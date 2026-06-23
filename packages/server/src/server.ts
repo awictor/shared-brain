@@ -48,7 +48,27 @@ export async function createServer(
 
   const app = express();
   app.use(helmet());
-  app.use(cors(config.allowedOrigins ? { origin: config.allowedOrigins } : undefined));
+
+  // CORS configuration: strict whitelist in production, allow all in dev
+  if (config.allowedOrigins && config.allowedOrigins.length > 0) {
+    app.use(cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g., mobile apps, Postman)
+        if (!origin) return callback(null, true);
+        if (config.allowedOrigins!.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS policy violation: origin ${origin} not allowed`));
+        }
+      },
+      credentials: true,
+      maxAge: 86400, // cache preflight for 24h
+    }));
+  } else {
+    // Dev mode: allow all origins
+    app.use(cors());
+  }
+
   app.use(express.json({ limit: '10mb' }));
 
   if (config.authToken) {

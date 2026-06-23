@@ -189,8 +189,8 @@ describe('SharedBrain Onboarding E2E Flow', () => {
     await embeddings.initialize();
 
     // Create per-user handlers (simulates what happens when X-User-Id headers are sent)
-    aliceHandler = new MemoryHandler(store, embeddings, vectorIndex, undefined, 'alice', 'Alice Smith');
-    bobHandler = new MemoryHandler(store, embeddings, vectorIndex, undefined, 'bob', 'Bob Jones');
+    aliceHandler = new MemoryHandler(store, embeddings, vectorIndex, undefined, undefined, undefined, 'alice', 'Alice Smith');
+    bobHandler = new MemoryHandler(store, embeddings, vectorIndex, undefined, undefined, undefined, 'bob', 'Bob Jones');
 
     // Create HTTP server for health check tests
     const result = await createServer(

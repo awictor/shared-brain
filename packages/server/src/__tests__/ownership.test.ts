@@ -177,8 +177,8 @@ describe('Multi-User Ownership Model', () => {
     vectorIndex = new InMemoryVectorIndex();
 
     // Two handlers sharing the same store/index but with different user identities
-    alice = new MemoryHandler(store, embeddings, vectorIndex, undefined, 'alice', 'Alice Smith');
-    bob = new MemoryHandler(store, embeddings, vectorIndex, undefined, 'bob', 'Bob Jones');
+    alice = new MemoryHandler(store, embeddings, vectorIndex, undefined, undefined, undefined, 'alice', 'Alice Smith');
+    bob = new MemoryHandler(store, embeddings, vectorIndex, undefined, undefined, undefined, 'bob', 'Bob Jones');
   });
 
   // ─── Test 1: memory_store stamps authorId ──────────────────────────────────
@@ -381,7 +381,7 @@ describe('Multi-User Ownership Model', () => {
     });
 
     it('stores correct authorId even after setCurrentUser is called', async () => {
-      const handler = new MemoryHandler(store, embeddings, vectorIndex, undefined, 'charlie', 'Charlie');
+      const handler = new MemoryHandler(store, embeddings, vectorIndex, undefined, undefined, undefined, 'charlie', 'Charlie');
 
       const r1 = await handler.handleStore({ content: 'Charlie note.', type: 'fact' });
       expect((await store.getMemory(r1.id))!.authorId).toBe('charlie');

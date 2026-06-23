@@ -32,6 +32,7 @@ import { NotificationManager } from './notifications.js';
 import { registerNotificationsDemo } from './notifications-demo.js';
 import { FullTextIndex as FullTextIndexImpl } from './fulltext.js';
 import { registerMonitoring } from './monitoring.js';
+import { registerAdmin } from './admin.js';
 import type { Store, Embeddings, VectorIndex, FullTextIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -668,6 +669,11 @@ console.log(`[backup] Backup manager ready → http://${host}:${port}/demo/backu
 registerNotificationsDemo(app, notificationManager);
 console.log(`[notifications] Notifications demo → http://${host}:${port}/demo/notifications`);
 
+// Wire up admin panel (localhost-only)
+(app as any).locals = (app as any).locals || {};
+(app as any).locals.store = store;
+registerAdmin(app);
+console.log(`[admin] Admin panel → http://${host}:${port}/admin (localhost only)`);
 
 // JWT token issuance endpoint
 app.get('/api/auth/token', (req, res) => {
@@ -684,6 +690,27 @@ app.get('/api/auth/token', (req, res) => {
     res.json({ token, expiresIn: '30d' });
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? 'Failed to issue token' });
+  }
+});
+
+// JWT token revocation endpoint
+app.get('/api/auth/revoke', (req, res) => {
+  const token = req.query['token'] as string;
+
+  if (!token) {
+    res.status(400).json({ error: 'Missing token query parameter' });
+    return;
+  }
+
+  try {
+    const success = jwtAuth.revokeToken(token);
+    if (success) {
+      res.json({ success: true, message: 'Token revoked successfully' });
+    } else {
+      res.status(400).json({ error: 'Invalid token or already revoked' });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? 'Failed to revoke token' });
   }
 });
 
