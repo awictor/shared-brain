@@ -13,6 +13,7 @@ import { registerSecurityDemo } from './security-demo.js';
 import { HNSWIndex } from './hnsw.js';
 import { registerOnboarding } from './onboarding.js';
 import { registerOnboardingDemo } from './onboarding-demo.js';
+import { registerApp } from './app.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -394,6 +395,10 @@ registerOnboarding(app, { store, identityManager, vectorIndex, embeddings, dbPat
 registerOnboardingDemo(app, { store, identityManager, vectorIndex });
 console.log(`[onboarding] Setup wizard → http://${host}:${port}/setup`);
 console.log(`[onboarding] Status page → http://${host}:${port}/status`);
+
+// Wire up the unified SPA
+registerApp(app);
+console.log(`[app] SharedBrain SPA → http://${host}:${port}/app`);
 
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);
