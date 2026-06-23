@@ -154,7 +154,7 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
 
   server.tool(
     'memory_list',
-    'List memories with filtering and pagination. Unlike search, this does NOT use semantic similarity — it returns memories by recency or filter criteria.',
+    'List memories with filtering and pagination. Unlike search, this does NOT use semantic similarity — it returns memories by recency or filter criteria. Use mine=true to only show your own memories.',
     {
       scope: z.object({
         personal: z.boolean().default(true),
@@ -168,6 +168,7 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
         since: z.string().optional(),
         before: z.string().optional(),
       }).optional(),
+      mine: z.boolean().default(false).describe('If true, only return memories authored by the current user.'),
       sort: z.enum(['newest', 'oldest', 'updated']).default('newest'),
       limit: z.number().default(20),
       offset: z.number().default(0),
@@ -322,12 +323,17 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
         (m) => m.source?.agent && m.source.agent !== 'local',
       );
 
+      // Others' memories: memories not authored by the current user
+      const othersMemories = recentResult.memories.filter((m) => !m.isOwner);
+
       // Sync status for total count + last sync time
       const syncStatus = await handler.handleSyncStatus();
 
       const checkin = {
         recentMemories: recentResult.memories,
         todayMemories: todayResult.memories,
+        yourMemories: recentResult.memories.filter((m) => m.isOwner),
+        othersMemories,
         activeProjects,
         pendingActions,
         crossAgentActivity,

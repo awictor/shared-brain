@@ -223,6 +223,91 @@ const UX_ENHANCE_JS = `(function() {
       background: #232F3E; border: 1px solid #3a4a5a; border-radius: 3px;
       padding: 1px 5px; font-size: 11px; font-family: monospace;
     }
+
+    /* ─── Ownership UI ─────────────────────────────────────────────────────── */
+
+    /* Ownership badge pills */
+    .ux-owner-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;
+      font-family: Inter, system-ui, sans-serif; line-height: 1.4;
+      vertical-align: middle; margin-left: 8px;
+    }
+    .ux-owner-badge.ux-badge-you {
+      background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .ux-owner-badge.ux-badge-other {
+      background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+    .ux-owner-dot {
+      width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+    }
+
+    /* User identity chip in topbar */
+    .ux-user-chip {
+      position: fixed; top: 12px; right: 80px; z-index: 99995;
+      display: flex; align-items: center; gap: 8px;
+      background: #1a2332; border: 1px solid #3a4a5a; border-radius: 20px;
+      padding: 4px 14px 4px 4px; cursor: pointer;
+      font-family: Inter, system-ui, sans-serif; transition: border-color 200ms;
+    }
+    .ux-user-chip:hover { border-color: #FF6100; }
+    .ux-user-avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; color: #fff;
+    }
+    .ux-user-name { font-size: 12px; color: #F5F3EF; font-weight: 500; }
+    .ux-user-dropdown {
+      position: absolute; top: 38px; right: 0; min-width: 180px;
+      background: #232F3E; border: 1px solid #3a4a5a; border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: none;
+      font-family: Inter, system-ui, sans-serif; overflow: hidden;
+    }
+    .ux-user-dropdown.open { display: block; }
+    .ux-user-dropdown-item {
+      padding: 10px 16px; font-size: 12px; color: #F5F3EF; cursor: pointer;
+      display: flex; align-items: center; gap: 8px; transition: background 100ms;
+    }
+    .ux-user-dropdown-item:hover { background: rgba(255, 97, 0, 0.1); }
+    .ux-user-dropdown-item.active { color: #FF6100; }
+    .ux-user-dropdown-divider { height: 1px; background: #3a4a5a; margin: 4px 0; }
+
+    /* My Memories filter toggle */
+    .ux-my-memories-toggle {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+      font-family: Inter, system-ui, sans-serif; cursor: pointer;
+      border: 1px solid #3a4a5a; background: transparent; color: #8a9aaa;
+      transition: all 200ms; margin-left: 8px;
+    }
+    .ux-my-memories-toggle:hover { border-color: #FF6100; color: #F5F3EF; }
+    .ux-my-memories-toggle.active {
+      background: rgba(255, 97, 0, 0.12); border-color: #FF6100; color: #FF6100;
+    }
+
+    /* Permission denied toast */
+    .ux-permission-toast {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); z-index: 99999;
+      background: #232F3E; border: 1px solid #ef4444; border-radius: 8px;
+      padding: 12px 20px; color: #ef4444; font-size: 13px; font-weight: 500;
+      font-family: Inter, system-ui, sans-serif;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: ux-toast-in 300ms ease;
+    }
+
+    /* Card shake animation */
+    @keyframes ux-shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+      20%, 40%, 60%, 80% { transform: translateX(4px); }
+    }
+    .ux-shake { animation: ux-shake 0.5s ease; }
+
+    /* User color-coded left border on cards */
+    .ux-user-border {
+      border-left: 3px solid var(--ux-user-color, #3a4a5a) !important;
+    }
   \`;
   document.head.appendChild(style);
 
@@ -673,12 +758,244 @@ const UX_ENHANCE_JS = `(function() {
     return div.innerHTML;
   }
 
+  // ─── 11. Ownership-Aware UI ────────────────────────────────────────────────
+
+  // Utility: hash authorId to a consistent HSL color
+  function userColor(authorId) {
+    if (!authorId) return '#3a4a5a';
+    var hash = 0;
+    for (var i = 0; i < authorId.length; i++) {
+      hash = authorId.charCodeAt(i) + ((hash << 5) - hash);
+      hash = hash & hash;
+    }
+    var hue = Math.abs(hash) % 360;
+    return 'hsl(' + hue + ', 60%, 55%)';
+  }
+
+  // Get current user name from localStorage
+  function getCurrentUser() {
+    return localStorage.getItem('sb-user-name') || 'anonymous';
+  }
+
+  // Set current user name
+  function setCurrentUser(name) {
+    localStorage.setItem('sb-user-name', name);
+  }
+
+  // Check if "My Memories" filter is active
+  function isMyMemoriesFilter() {
+    return localStorage.getItem('sb-my-memories-filter') === '1';
+  }
+
+  function setMyMemoriesFilter(on) {
+    localStorage.setItem('sb-my-memories-filter', on ? '1' : '0');
+  }
+
+  // ─── 11a. User Identity Chip ──────────────────────────────────────────────
+  function setupUserChip() {
+    var userName = getCurrentUser();
+    var firstLetter = (userName.charAt(0) || '?').toUpperCase();
+    var chipColor = userColor(userName);
+
+    var chip = document.createElement('div');
+    chip.className = 'ux-user-chip';
+    chip.id = 'ux-user-chip';
+    chip.innerHTML = '<div class="ux-user-avatar" style="background:' + chipColor + '">' + escapeHtml(firstLetter) + '</div>'
+      + '<span class="ux-user-name">' + escapeHtml(userName) + '</span>'
+      + '<div class="ux-user-dropdown" id="ux-user-dropdown">'
+      + '<div class="ux-user-dropdown-item" id="ux-switch-user">&#x1f465; Switch User</div>'
+      + '<div class="ux-user-dropdown-divider"></div>'
+      + '<div class="ux-user-dropdown-item' + (isMyMemoriesFilter() ? ' active' : '') + '" id="ux-my-memories-dropdown">&#x1f4dd; My Memories Only</div>'
+      + '</div>';
+    document.body.appendChild(chip);
+
+    var dropdown = document.getElementById('ux-user-dropdown');
+
+    chip.addEventListener('click', function(e) {
+      e.stopPropagation();
+      dropdown.classList.toggle('open');
+    });
+
+    document.addEventListener('click', function() {
+      dropdown.classList.remove('open');
+    });
+
+    document.getElementById('ux-switch-user').addEventListener('click', function(e) {
+      e.stopPropagation();
+      var newName = prompt('Enter user alias:', getCurrentUser());
+      if (newName && newName.trim()) {
+        setCurrentUser(newName.trim());
+        // Refresh the chip
+        chip.remove();
+        setupUserChip();
+        applyOwnershipUI();
+      }
+      dropdown.classList.remove('open');
+    });
+
+    document.getElementById('ux-my-memories-dropdown').addEventListener('click', function(e) {
+      e.stopPropagation();
+      var current = isMyMemoriesFilter();
+      setMyMemoriesFilter(!current);
+      this.classList.toggle('active', !current);
+      applyOwnershipUI();
+      dropdown.classList.remove('open');
+    });
+  }
+
+  // ─── 11b. My Memories Toggle Button ──────────────────────────────────────
+  function setupMyMemoriesToggle() {
+    // Find the search controls area and inject the toggle
+    var searchControls = document.querySelector('.search-controls') || document.querySelector('#search-results')?.parentElement;
+    if (!searchControls) return;
+
+    // Check if toggle already exists
+    if (document.getElementById('ux-my-memories-btn')) return;
+
+    var toggle = document.createElement('button');
+    toggle.className = 'ux-my-memories-toggle' + (isMyMemoriesFilter() ? ' active' : '');
+    toggle.id = 'ux-my-memories-btn';
+    toggle.innerHTML = '&#x1f464; My Memories';
+    toggle.title = 'Show only your memories';
+
+    toggle.addEventListener('click', function() {
+      var current = isMyMemoriesFilter();
+      setMyMemoriesFilter(!current);
+      toggle.classList.toggle('active', !current);
+      // Also sync the dropdown item
+      var ddItem = document.getElementById('ux-my-memories-dropdown');
+      if (ddItem) ddItem.classList.toggle('active', !current);
+      applyOwnershipUI();
+    });
+
+    // Insert at the beginning of search controls
+    searchControls.insertBefore(toggle, searchControls.firstChild);
+  }
+
+  // ─── 11c. Ownership Badges & Color Coding on Cards ────────────────────────
+  function applyOwnershipUI() {
+    var currentUser = getCurrentUser();
+    var filterMyOnly = isMyMemoriesFilter();
+
+    // Find all memory cards (common selectors)
+    var cards = document.querySelectorAll('.memory-card, .result-card, [data-memory-id]');
+    cards.forEach(function(card) {
+      // Read ownership data from card attributes or embedded data
+      var authorId = card.getAttribute('data-author') || card.getAttribute('data-author-id') || '';
+      var isOwner = card.getAttribute('data-is-owner') === 'true' || (authorId && authorId === currentUser);
+
+      // Remove previous badges
+      var oldBadge = card.querySelector('.ux-owner-badge');
+      if (oldBadge) oldBadge.remove();
+
+      // Apply left border color
+      var color = userColor(authorId || currentUser);
+      card.style.setProperty('--ux-user-color', color);
+      card.classList.add('ux-user-border');
+
+      // Add ownership badge
+      var badge = document.createElement('span');
+      if (isOwner) {
+        badge.className = 'ux-owner-badge ux-badge-you';
+        badge.innerHTML = '<span class="ux-owner-dot" style="background:#22c55e"></span> You';
+      } else if (authorId) {
+        badge.className = 'ux-owner-badge ux-badge-other';
+        badge.innerHTML = '<span class="ux-owner-dot" style="background:' + color + '"></span> ' + escapeHtml(authorId);
+      }
+
+      // Insert badge into card header/title area
+      var header = card.querySelector('.card-header, .card-title, h3, h4, .memory-title');
+      if (header) {
+        header.appendChild(badge);
+      } else {
+        card.prepend(badge);
+      }
+
+      // Show/hide edit and delete buttons based on ownership
+      var editBtns = card.querySelectorAll('.edit-btn, .delete-btn, [data-action="edit"], [data-action="delete"], button[onclick*="edit"], button[onclick*="delete"]');
+      editBtns.forEach(function(btn) {
+        if (isOwner) {
+          btn.style.display = '';
+        } else {
+          btn.style.display = 'none';
+        }
+      });
+
+      // My Memories filter: hide/show cards
+      if (filterMyOnly) {
+        card.style.display = isOwner ? '' : 'none';
+      } else {
+        card.style.display = '';
+      }
+    });
+  }
+
+  // ─── 11d. Permission Denied Toast & Shake ─────────────────────────────────
+  function showPermissionDenied(cardEl) {
+    // Show toast
+    var existing = document.querySelector('.ux-permission-toast');
+    if (existing) existing.remove();
+
+    var toast = document.createElement('div');
+    toast.className = 'ux-permission-toast';
+    toast.textContent = 'You can only edit your own memories';
+    document.body.appendChild(toast);
+    setTimeout(function() { if (toast.parentNode) toast.remove(); }, 3500);
+
+    // Shake animation on card
+    if (cardEl) {
+      cardEl.classList.add('ux-shake');
+      setTimeout(function() { cardEl.classList.remove('ux-shake'); }, 600);
+    }
+  }
+
+  // Intercept edit/delete actions on non-owned cards
+  function setupPermissionGuards() {
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest('.edit-btn, .delete-btn, [data-action="edit"], [data-action="delete"]');
+      if (!btn) return;
+
+      var card = btn.closest('.memory-card, .result-card, [data-memory-id]');
+      if (!card) return;
+
+      var authorId = card.getAttribute('data-author') || card.getAttribute('data-author-id') || '';
+      var isOwner = card.getAttribute('data-is-owner') === 'true' || (authorId && authorId === getCurrentUser());
+
+      if (!isOwner) {
+        e.preventDefault();
+        e.stopPropagation();
+        showPermissionDenied(card);
+      }
+    }, true); // capture phase to intercept before handlers
+  }
+
+  // ─── 11e. Observe DOM for dynamically loaded cards ────────────────────────
+  function setupOwnershipObserver() {
+    var targetNode = document.querySelector('.main, #app, main, body');
+    if (!targetNode) targetNode = document.body;
+
+    var debounceTimer = null;
+    var observer = new MutationObserver(function() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() {
+        applyOwnershipUI();
+        setupMyMemoriesToggle();
+      }, 150);
+    });
+    observer.observe(targetNode, { childList: true, subtree: true });
+  }
+
   // ─── Initialize all enhancements after DOM ready ──────────────────────────
   function init() {
     setupValidation();
     setupTagAutocomplete();
     setupEmptySearchState();
     startTour();
+    setupUserChip();
+    setupMyMemoriesToggle();
+    setupPermissionGuards();
+    applyOwnershipUI();
+    setupOwnershipObserver();
   }
 
   if (document.readyState === 'loading') {

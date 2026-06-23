@@ -19,6 +19,7 @@ export interface ServerConfig {
   authToken?: string;
   modelsPath?: string;
   toolDeps?: Record<string, unknown>;
+  allowedOrigins?: string[];
 }
 
 export interface ServerInstance {
@@ -42,7 +43,7 @@ export async function createServer(
 
   const app = express();
   app.use(helmet());
-  app.use(cors());
+  app.use(cors(config.allowedOrigins ? { origin: config.allowedOrigins } : undefined));
   app.use(express.json({ limit: '10mb' }));
 
   if (config.authToken) {

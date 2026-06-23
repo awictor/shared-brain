@@ -17,11 +17,21 @@ import { registerOnboardingDemo } from './onboarding-demo.js';
 import { registerApp } from './app.js';
 import { registerUXResearch } from './ux-research.js';
 import { registerUXEnhancements } from './ux-enhancements.js';
+import { registerHealthChecks } from './healthcheck.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+
+// ─── Environment Configuration ──────────────────────────────────────────────
+
+const NODE_ENV = process.env['NODE_ENV'] ?? 'development';
+const IS_PRODUCTION = NODE_ENV === 'production';
+const MAX_MEMORIES_PER_USER = parseInt(process.env['MAX_MEMORIES_PER_USER'] ?? '10000', 10);
+const ALLOWED_ORIGINS = process.env['ALLOWED_ORIGINS']
+  ? process.env['ALLOWED_ORIGINS'].split(',').map(o => o.trim())
+  : undefined; // undefined = allow all (dev mode)
 
 // ─── Persistent SQLite Store (sql.js — pure JS, no native deps) ─────────────
 
@@ -106,6 +116,16 @@ class SqlJsStore implements Store {
   }
 
   async createMemory(memory: Memory): Promise<void> {
+    // Enforce per-user memory limit
+    const countRows = this.db!.exec(
+      'SELECT COUNT(*) FROM memories WHERE author_id = ? AND deleted = 0',
+      [memory.authorId]
+    );
+    const userCount = countRows[0]?.values[0]?.[0] as number ?? 0;
+    if (userCount >= MAX_MEMORIES_PER_USER) {
+      throw new Error(`Memory limit reached: user ${memory.authorId} has ${userCount}/${MAX_MEMORIES_PER_USER} memories`);
+    }
+
     this.db!.run(
       `INSERT INTO memories (id, content, title, type, scope, team_id, org_id, author_id, author_name, tags_json, deleted, source_json, relations_json, hlc, created_at, updated_at, version, embedding)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -247,6 +267,101 @@ class SqlJsStore implements Store {
       source: JSON.parse(r.source_json || '{}'), relations: JSON.parse(r.relations_json || '[]'), version: r.version,
     };
   }
+
+  /** Returns a user-scoped store that enforces per-user data isolation. */
+  forUser(userId: string, userName?: string, teamIds?: string[]): UserScopedStore {
+    return new UserScopedStore(this, userId, userName ?? userId, teamIds ?? []);
+  }
+}
+
+/**
+ * UserScopedStore — wraps SqlJsStore to enforce per-user data isolation.
+ * Returned by SqlJsStore.forUser(userId).
+ */
+class UserScopedStore implements Store {
+  constructor(
+    private readonly inner: SqlJsStore,
+    private readonly userId: string,
+    private readonly userName: string,
+    private readonly teamIds: string[] = [],
+  ) {}
+
+  private canRead(m: Memory): boolean {
+    if (m.scope === 'personal') return m.authorId === this.userId;
+    if (m.scope === 'team') return this.teamIds.includes(m.teamId ?? '');
+    if (m.scope === 'org') return true;
+    return false;
+  }
+
+  private assertOwner(m: Memory): void {
+    if (m.authorId !== this.userId) {
+      throw new Error(`Access denied: user ${this.userId} cannot modify memory owned by ${m.authorId}`);
+    }
+  }
+
+  async initialize(): Promise<void> {
+    return this.inner.initialize();
+  }
+
+  async createMemory(memory: Memory): Promise<void> {
+    return this.inner.createMemory({
+      ...memory,
+      authorId: this.userId,
+      authorName: this.userName,
+    });
+  }
+
+  async getMemory(id: string): Promise<Memory | null> {
+    const m = await this.inner.getMemory(id);
+    if (!m) return null;
+    return this.canRead(m) ? m : null;
+  }
+
+  async updateMemory(id: string, fields: Partial<Memory>): Promise<void> {
+    const existing = await this.inner.getMemory(id);
+    if (!existing) throw new Error(`Memory ${id} not found`);
+    this.assertOwner(existing);
+    return this.inner.updateMemory(id, fields);
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    const existing = await this.inner.getMemory(id);
+    if (!existing) throw new Error(`Memory ${id} not found`);
+    this.assertOwner(existing);
+    return this.inner.deleteMemory(id);
+  }
+
+  async listMemories(options: ListOptions): Promise<Memory[]> {
+    const scopedOptions = { ...options };
+    scopedOptions.scope = { personal: true, teamIds: this.teamIds, org: true };
+
+    const memories = await this.inner.listMemories(scopedOptions);
+    return memories.filter(m => this.canRead(m));
+  }
+
+  async countMemories(scope?: ScopeFilter): Promise<number> {
+    const memories = await this.listMemories({ scope: scope ?? { personal: true, teamIds: this.teamIds, org: true } } as ListOptions);
+    return memories.length;
+  }
+
+  async createOperation(op: MemoryOperation): Promise<void> {
+    return this.inner.createOperation({
+      ...op,
+      authorId: this.userId,
+    });
+  }
+
+  async getPendingOperations(): Promise<MemoryOperation[]> {
+    return this.inner.getPendingOperations();
+  }
+
+  async getLastSyncTime(): Promise<string | null> {
+    return this.inner.getLastSyncTime();
+  }
+
+  async getAllTags(): Promise<Array<{ tag: string; count: number }>> {
+    return this.inner.getAllTags();
+  }
 }
 
 // ─── Vector Index (HNSW, rebuilt from DB on startup) ─────────────────────────
@@ -292,13 +407,18 @@ class PersistentHNSWIndex implements VectorIndex {
 // ─── ONNX Embedding Engine ───────────────────────────────────────────────────
 
 class OnnxEmbeddingEngine implements Embeddings {
-  private extractor: any = null;
+  public extractor: any = null;
   private readonly dimensions = 384;
   private readonly modelName = 'Xenova/all-MiniLM-L6-v2';
 
   async initialize(): Promise<void> {
-    console.log(`[embeddings] Loading ONNX model: ${this.modelName}...`);
-    const { pipeline } = await import('@xenova/transformers');
+    console.log(`[embeddings] Loading ONNX model: ${this.modelName} (env=${NODE_ENV})...`);
+    const { pipeline, env } = await import('@xenova/transformers');
+    // In production, disable the hash-based embeddings fallback — always require ONNX
+    if (IS_PRODUCTION) {
+      (env as any).allowLocalModels = false;
+      (env as any).useBrowserCache = false;
+    }
     this.extractor = await pipeline('feature-extraction', this.modelName, { quantized: true });
     console.log(`[embeddings] Model loaded — ${this.dimensions}-dim semantic embeddings ready.`);
   }
@@ -335,12 +455,16 @@ const organizer = new Organizer(embeddings, vectorIndex, store);
 const autoEnhancer = new AutoEnhancer(organizer, store, embeddings, vectorIndex);
 
 const { app, handler } = await createServer(
-  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined, toolDeps: { autoEnhancer } },
+  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined, toolDeps: { autoEnhancer }, allowedOrigins: ALLOWED_ORIGINS },
   { store, embeddings, vectorIndex },
 );
 
 // Load vectors from persisted embeddings into HNSW index
 await vectorIndex.loadFromStore();
+
+// Register health check endpoints (before security middleware so ALB can reach /health/*)
+registerHealthChecks(app, { store, embeddings, vectorIndex });
+console.log(`[health] Health checks → /health/ready, /health/deep, /health/metrics`);
 
 // Wire up security layer (zero-config)
 const security = new SecurityLayer(store.db);
@@ -349,6 +473,15 @@ const { token: securityToken } = security.initialize();
 // Apply security middleware to all routes
 app.use(security.securityHeadersMiddleware());
 app.use(security.auditMiddleware());
+
+// User identification from request headers (injected by proxy)
+app.use('/mcp', (req, _res, next) => {
+  const userId = req.headers['x-user-id'] as string ?? 'anonymous';
+  const userName = req.headers['x-user-name'] as string ?? userId;
+  // Set on the handler so MCP tools use the right identity
+  handler.setCurrentUser(userId, userName);
+  next();
+});
 
 // Route-specific rate limits
 app.use('/mcp', security.rateLimitMiddleware(100, 60_000));       // 100/min for MCP
@@ -424,36 +557,135 @@ app.get('/proxy.js', (_req, res) => {
 /**
  * SharedBrain MCP Proxy — connects your AI agent to the team brain.
  * Points to: ${serverUrl}/mcp
+ *
+ * On first run, prompts for your user alias and saves to ~/.shared-brain/identity.json
  */
 const MCP_URL = '${serverUrl}/mcp';
-let buffer = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  buffer += chunk;
-  const lines = buffer.split('\\n');
-  buffer = lines.pop();
-  for (const line of lines) { if (line.trim()) handleMessage(line); }
-});
-process.stdin.on('end', () => { if (buffer.trim()) handleMessage(buffer); });
-async function handleMessage(line) {
+const path = require('path');
+const fs = require('fs');
+const readline = require('readline');
+
+const CONFIG_DIR = path.join(require('os').homedir(), '.shared-brain');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'identity.json');
+
+async function getIdentity() {
+  if (fs.existsSync(CONFIG_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    } catch {}
+  }
+  // First run — prompt for identity
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  const ask = (q) => new Promise(resolve => rl.question(q, resolve));
+  process.stderr.write('\\n=== SharedBrain First-Run Setup ===\\n');
+  const userId = await ask('Your alias (e.g. jsmith): ');
+  const userName = await ask('Display name (e.g. Jane Smith): ');
+  rl.close();
+  const identity = { userId: userId.trim(), userName: userName.trim() };
+  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(identity, null, 2));
+  process.stderr.write('Identity saved to ' + CONFIG_FILE + '\\n\\n');
+  return identity;
+}
+
+async function main() {
+  const identity = await getIdentity();
+  let buffer = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    buffer += chunk;
+    const lines = buffer.split('\\n');
+    buffer = lines.pop();
+    for (const line of lines) { if (line.trim()) handleMessage(line, identity); }
+  });
+  process.stdin.on('end', () => { if (buffer.trim()) handleMessage(buffer, identity); });
+}
+
+async function handleMessage(line, identity) {
   try {
     JSON.parse(line);
-    const resp = await fetch(MCP_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body: line });
+    const resp = await fetch(MCP_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/event-stream',
+        'X-User-Id': identity.userId,
+        'X-User-Name': identity.userName,
+      },
+      body: line,
+    });
     const text = await resp.text();
     const dataLines = text.split('\\n').filter(l => l.startsWith('data: '));
     for (const dl of dataLines) process.stdout.write(dl.slice(6) + '\\n');
     if (!dataLines.length && text.trim()) process.stdout.write(text.trim() + '\\n');
   } catch (err) {
-    try { const p = JSON.parse(line); process.stdout.write(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: String(err.message || err) }, id: p.id ?? null }) + '\\n'); }
-    catch { process.stderr.write('Proxy error: ' + err + '\\n'); }
+    try {
+      const p = JSON.parse(line);
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: String(err.message || err) }, id: p.id ?? null }) + '\\n');
+    } catch { process.stderr.write('Proxy error: ' + err + '\\n'); }
   }
 }
+
+main();
 `;
   res.setHeader('Content-Type', 'application/javascript');
   res.send(script);
 });
 
+// User directory API
+app.get('/api/users', (_req, res) => {
+  try {
+    const rows = store.db!.exec(`
+      SELECT
+        a.user_id,
+        a.name as agent_name,
+        a.last_seen,
+        a.memories_created,
+        u.name as display_name,
+        u.email
+      FROM agents a
+      LEFT JOIN users u ON a.user_id = u.id
+      ORDER BY a.last_seen DESC
+    `);
+
+    if (!rows.length || !rows[0].values.length) {
+      res.json({ users: [] });
+      return;
+    }
+
+    // Group by user_id
+    const userMap = new Map<string, { userId: string; displayName: string; email: string | null; agents: string[]; memoryCount: number; lastActive: string }>();
+
+    for (const row of rows[0].values) {
+      const cols = rows[0].columns;
+      const r = Object.fromEntries(cols.map((c: string, i: number) => [c, row[i]])) as any;
+
+      const existing = userMap.get(r.user_id);
+      if (existing) {
+        existing.agents.push(r.agent_name);
+        existing.memoryCount += r.memories_created ?? 0;
+        if (r.last_seen > existing.lastActive) existing.lastActive = r.last_seen;
+      } else {
+        userMap.set(r.user_id, {
+          userId: r.user_id,
+          displayName: r.display_name ?? r.user_id,
+          email: r.email ?? null,
+          agents: [r.agent_name],
+          memoryCount: r.memories_created ?? 0,
+          lastActive: r.last_seen,
+        });
+      }
+    }
+
+    res.json({ users: [...userMap.values()] });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? 'Failed to list users' });
+  }
+});
+
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);
   console.log(`[shared-brain] Database: ${dbPath}`);
+  console.log(`[shared-brain] Environment: ${NODE_ENV} | Max memories/user: ${MAX_MEMORIES_PER_USER}`);
+  if (ALLOWED_ORIGINS) console.log(`[shared-brain] CORS origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });

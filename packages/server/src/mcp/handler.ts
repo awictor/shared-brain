@@ -167,11 +167,28 @@ const LOCAL_USER_ID = 'local';
 const LOCAL_USER_NAME = 'Local User';
 
 export class MemoryHandler {
+  private _currentUserId: string = LOCAL_USER_ID;
+  private _currentUserName: string = LOCAL_USER_NAME;
+
   constructor(
     private readonly store: Store,
     private readonly embeddings: Embeddings,
     private readonly vectorIndex: VectorIndex,
-  ) {}
+    currentUserId?: string,
+    currentUserName?: string,
+  ) {
+    if (currentUserId) this._currentUserId = currentUserId;
+    if (currentUserName) this._currentUserName = currentUserName;
+  }
+
+  get currentUserId(): string {
+    return this._currentUserId;
+  }
+
+  setCurrentUser(userId: string, userName?: string): void {
+    this._currentUserId = userId;
+    if (userName) this._currentUserName = userName;
+  }
 
   /**
    * Store a new memory: compute embedding, persist, index vector, log operation.
@@ -179,11 +196,12 @@ export class MemoryHandler {
   async handleStore(params: StoreParams): Promise<{ id: string; message: string }> {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const hlc = `${Date.now()}:0000:${LOCAL_USER_ID}`;
+    const hlc = `${Date.now()}:0000:${this._currentUserId}`;
 
     // Compute embedding
     const embedding = await this.embeddings.embed(params.content);
 
+    // Always stamp authorId with current user (override whatever caller passes)
     const memory: Memory = {
       id,
       content: params.content,
@@ -192,8 +210,8 @@ export class MemoryHandler {
       scope: (params.scope || 'personal') as MemoryScope,
       teamId: null,
       orgId: null,
-      authorId: LOCAL_USER_ID,
-      authorName: LOCAL_USER_NAME,
+      authorId: this._currentUserId,
+      authorName: this._currentUserName,
       tags: params.tags ?? [],
       embedding,
       hlc,
@@ -220,7 +238,7 @@ export class MemoryHandler {
       id: randomUUID(),
       memoryId: id,
       hlc,
-      authorId: LOCAL_USER_ID,
+      authorId: this._currentUserId,
       type: 'create',
       payload: { content: params.content, title: params.title, type: params.type, tags: params.tags },
       scope: memory.scope,
@@ -235,7 +253,7 @@ export class MemoryHandler {
   /**
    * Semantic search: embed query, search vector index, filter, return ranked results.
    */
-  async handleSearch(params: SearchParams): Promise<Array<{ memory: Omit<Memory, 'embedding'>; score: number }>> {
+  async handleSearch(params: SearchParams): Promise<Array<{ memory: Omit<Memory, 'embedding'> & { isOwner: boolean }; score: number }>> {
     const limit = params.limit ?? 10;
     const threshold = params.threshold ?? 0.3;
 
@@ -245,7 +263,7 @@ export class MemoryHandler {
     // Search vector index (fetch extra to account for filtering)
     const candidates = this.vectorIndex.search(queryVector, limit * 3, threshold);
 
-    const results: Array<{ memory: Omit<Memory, 'embedding'>; score: number }> = [];
+    const results: Array<{ memory: Omit<Memory, 'embedding'> & { isOwner: boolean }; score: number }> = [];
 
     for (const candidate of candidates) {
       if (results.length >= limit) break;
@@ -264,16 +282,19 @@ export class MemoryHandler {
       }
 
       const { embedding: _, ...memoryWithoutEmbedding } = memory;
-      results.push({ memory: memoryWithoutEmbedding, score: candidate.score });
+      results.push({
+        memory: { ...memoryWithoutEmbedding, isOwner: memory.authorId === this._currentUserId },
+        score: candidate.score,
+      });
     }
 
     return results;
   }
 
   /**
-   * Get a specific memory by ID with permission check.
+   * Get a specific memory by ID. Readable by anyone (shared brain), but includes isOwner flag.
    */
-  async handleGet(params: { id: string }): Promise<Omit<Memory, 'embedding'> | null> {
+  async handleGet(params: { id: string }): Promise<(Omit<Memory, 'embedding'> & { isOwner: boolean }) | null> {
     const memory = await this.store.getMemory(params.id);
 
     if (!memory || memory.deleted) {
@@ -281,11 +302,12 @@ export class MemoryHandler {
     }
 
     const { embedding: _, ...memoryWithoutEmbedding } = memory;
-    return memoryWithoutEmbedding;
+    return { ...memoryWithoutEmbedding, isOwner: memory.authorId === this._currentUserId };
   }
 
   /**
    * Partial update: recompute embedding if content changed, log operation.
+   * Enforces ownership — only the author can edit their own memories.
    */
   async handleUpdate(params: UpdateParams): Promise<{ success: boolean; message: string }> {
     const existing = await this.store.getMemory(params.id);
@@ -293,8 +315,13 @@ export class MemoryHandler {
       return { success: false, message: 'Memory not found.' };
     }
 
+    // Ownership enforcement: only the author can edit
+    if (existing.authorId !== this._currentUserId) {
+      return { success: false, message: 'Permission denied: you can only edit your own memories.' };
+    }
+
     const now = new Date().toISOString();
-    const hlc = `${Date.now()}:0000:${LOCAL_USER_ID}`;
+    const hlc = `${Date.now()}:0000:${this._currentUserId}`;
     const updates: Partial<Memory> = { updatedAt: now, hlc, version: existing.version + 1 };
 
     if (params.content !== undefined) updates.content = params.content;
@@ -345,7 +372,7 @@ export class MemoryHandler {
       id: randomUUID(),
       memoryId: params.id,
       hlc,
-      authorId: LOCAL_USER_ID,
+      authorId: this._currentUserId,
       type: 'update',
       payload: { ...params, id: undefined },
       scope: updates.scope ?? existing.scope,
@@ -359,6 +386,7 @@ export class MemoryHandler {
 
   /**
    * Soft-delete a memory and log the operation.
+   * Enforces ownership — only the author can delete their own memories.
    */
   async handleDelete(params: { id: string }): Promise<{ success: boolean; message: string }> {
     const existing = await this.store.getMemory(params.id);
@@ -366,8 +394,13 @@ export class MemoryHandler {
       return { success: false, message: 'Memory not found.' };
     }
 
+    // Ownership enforcement: only the author can delete
+    if (existing.authorId !== this._currentUserId) {
+      return { success: false, message: 'Permission denied: you can only delete your own memories.' };
+    }
+
     const now = new Date().toISOString();
-    const hlc = `${Date.now()}:0000:${LOCAL_USER_ID}`;
+    const hlc = `${Date.now()}:0000:${this._currentUserId}`;
 
     await this.store.updateMemory(params.id, { deleted: true, updatedAt: now, hlc });
     this.vectorIndex.remove(params.id);
@@ -377,7 +410,7 @@ export class MemoryHandler {
       id: randomUUID(),
       memoryId: params.id,
       hlc,
-      authorId: LOCAL_USER_ID,
+      authorId: this._currentUserId,
       type: 'delete',
       payload: {},
       scope: existing.scope,
@@ -391,15 +424,21 @@ export class MemoryHandler {
 
   /**
    * List memories with filters and pagination (no semantic ranking).
+   * Supports `mine` flag to only return memories authored by the current user.
    */
-  async handleList(params: ListOptions): Promise<{ memories: Array<Omit<Memory, 'embedding'>>; total: number }> {
+  async handleList(params: ListOptions & { mine?: boolean }): Promise<{ memories: Array<Omit<Memory, 'embedding'> & { isOwner: boolean }>; total: number }> {
+    // If mine=true, force the authorId filter to current user
+    const filters = params.mine
+      ? { ...params.filters, authorId: this._currentUserId }
+      : params.filters;
+
     const memories = await this.store.listMemories({
       scope: params.scope,
-      filters: params.filters,
+      filters,
       sort: params.sort ?? 'newest',
       limit: params.limit ?? 20,
       offset: params.offset ?? 0,
-      userId: LOCAL_USER_ID,
+      userId: this._currentUserId,
     });
 
     const total = await this.store.countMemories(params.scope);
@@ -407,7 +446,7 @@ export class MemoryHandler {
     return {
       memories: memories.map((m) => {
         const { embedding: _, ...rest } = m;
-        return rest;
+        return { ...rest, isOwner: m.authorId === this._currentUserId };
       }),
       total,
     };
@@ -491,7 +530,7 @@ export class MemoryHandler {
       sort: 'newest',
       limit: 10000,
       offset: 0,
-      userId: LOCAL_USER_ID,
+      userId: this._currentUserId,
     });
 
     const clean = memories.map((m) => {
@@ -522,7 +561,7 @@ export class MemoryHandler {
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
   private matchesScope(memory: Memory, scope: ScopeFilter): boolean {
-    if (scope.personal && memory.scope === 'personal' && memory.authorId === LOCAL_USER_ID) {
+    if (scope.personal && memory.scope === 'personal' && memory.authorId === this._currentUserId) {
       return true;
     }
     if (scope.teamIds?.length && memory.scope === 'team' && memory.teamId && scope.teamIds.includes(memory.teamId)) {

@@ -1,0 +1,41 @@
+[Unit]
+Description=SharedBrain MCP Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/shared-brain/packages/server
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3100
+Environment=HOST=0.0.0.0
+Environment=PUBLIC_URL=https://agenticmarketing.sps.amazon.dev/brain
+Environment=DB_PATH=/home/ec2-user/shared-brain/data/brain.db
+Environment=MAX_MEMORIES_PER_USER=10000
+
+# Node.js runtime
+ExecStart=/usr/bin/node dist/index.js
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=shared-brain
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ec2-user/shared-brain/data
+
+[Install]
+WantedBy=multi-user.target
