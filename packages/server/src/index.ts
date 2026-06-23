@@ -14,6 +14,7 @@ import { HNSWIndex } from './hnsw.js';
 import { registerOnboarding } from './onboarding.js';
 import { registerOnboardingDemo } from './onboarding-demo.js';
 import { registerApp } from './app.js';
+import { registerUXResearch } from './ux-research.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -399,6 +400,10 @@ console.log(`[onboarding] Status page → http://${host}:${port}/status`);
 // Wire up the unified SPA
 registerApp(app);
 console.log(`[app] SharedBrain SPA → http://${host}:${port}/app`);
+
+// Wire up UX research tools
+registerUXResearch(app);
+console.log(`[ux-research] Research tools → /research/analytics, /research/heuristics, /research/test`);
 
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);
