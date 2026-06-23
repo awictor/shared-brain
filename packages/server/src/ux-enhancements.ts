@@ -1,0 +1,690 @@
+/**
+ * UX Enhancements Module — Serves /ux-enhance.js
+ * Injected into the SharedBrain SPA to fix all heuristic issues.
+ */
+
+import type { Application } from 'express';
+
+export function registerUXEnhancements(app: Application): void {
+  app.get('/ux-enhance.js', (_req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(UX_ENHANCE_JS);
+  });
+
+  // Tags API endpoint for autocomplete (falls back to empty if store not available)
+  app.get('/api/tags', async (_req, res) => {
+    try {
+      // Try to get tags from the store via the app locals or a direct query
+      const store = (app as any).locals?.store;
+      if (store && typeof store.getAllTags === 'function') {
+        const tags = await store.getAllTags();
+        res.json(tags);
+      } else {
+        res.json([]);
+      }
+    } catch {
+      res.json([]);
+    }
+  });
+}
+
+const UX_ENHANCE_JS = `(function() {
+  'use strict';
+
+  // ─── Inject styles ─────────────────────────────────────────────────────────
+  var style = document.createElement('style');
+  style.id = 'ux-enhance-styles';
+  style.textContent = \`
+    /* Progress bar */
+    #ux-progress-bar {
+      position: fixed; top: 0; left: 0; height: 3px; z-index: 99999;
+      background: linear-gradient(90deg, #FF6100, #ff8c42);
+      width: 0; opacity: 0; transition: opacity 200ms;
+      pointer-events: none;
+    }
+    #ux-progress-bar.active {
+      opacity: 1;
+      animation: ux-progress 1.5s ease-in-out infinite;
+    }
+    @keyframes ux-progress {
+      0% { width: 0; left: 0; }
+      50% { width: 60%; left: 20%; }
+      100% { width: 0; left: 100%; }
+    }
+
+    /* Undo toast */
+    .ux-undo-toast {
+      position: fixed; bottom: 80px; right: 24px; z-index: 99998;
+      background: #232F3E; border: 1px solid #FF6100; border-radius: 8px;
+      padding: 14px 20px; color: #F5F3EF; font-size: 13px; font-family: Inter, system-ui, sans-serif;
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: ux-toast-in 300ms ease;
+    }
+    .ux-undo-toast .ux-undo-btn {
+      background: #FF6100; color: #fff; border: none; border-radius: 4px;
+      padding: 6px 14px; font-weight: 600; font-size: 12px; cursor: pointer;
+      transition: background 200ms;
+    }
+    .ux-undo-toast .ux-undo-btn:hover { background: #e55800; }
+    @keyframes ux-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Confirmation modal */
+    .ux-modal-overlay {
+      position: fixed; inset: 0; z-index: 100000;
+      background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;
+      animation: ux-fade-in 150ms ease;
+    }
+    .ux-modal {
+      background: #232F3E; border: 1px solid #3a4a5a; border-radius: 12px;
+      padding: 28px 32px; min-width: 340px; max-width: 480px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5); font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-modal h3 { color: #F5F3EF; font-size: 16px; margin-bottom: 12px; }
+    .ux-modal p { color: #8a9aaa; font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+    .ux-modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .ux-modal-actions button {
+      padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      border: none; cursor: pointer; transition: all 200ms;
+    }
+    .ux-modal-actions .ux-confirm { background: #FF6100; color: #fff; }
+    .ux-modal-actions .ux-confirm:hover { background: #e55800; }
+    .ux-modal-actions .ux-cancel { background: transparent; border: 1px solid #3a4a5a; color: #F5F3EF; }
+    .ux-modal-actions .ux-cancel:hover { border-color: #FF6100; color: #FF6100; }
+    @keyframes ux-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Empty content validation */
+    .ux-invalid-border { border-color: #ef4444 !important; }
+    .ux-validation-msg {
+      color: #ef4444; font-size: 11px; margin-top: 4px;
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    /* Tag autocomplete */
+    .ux-tag-dropdown {
+      position: absolute; z-index: 10000;
+      background: #232F3E; border: 1px solid #3a4a5a; border-radius: 6px;
+      max-height: 180px; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-tag-dropdown-item {
+      padding: 8px 14px; font-size: 12px; color: #F5F3EF; cursor: pointer;
+      transition: background 100ms;
+    }
+    .ux-tag-dropdown-item:hover, .ux-tag-dropdown-item.active {
+      background: rgba(255, 97, 0, 0.12); color: #FF6100;
+    }
+
+    /* Keyboard shortcut overlay / command palette */
+    .ux-shortcut-overlay {
+      position: fixed; inset: 0; z-index: 100001;
+      background: rgba(0,0,0,0.65); display: flex; align-items: flex-start; justify-content: center;
+      padding-top: 120px; animation: ux-fade-in 150ms ease;
+    }
+    .ux-shortcut-panel {
+      background: #232F3E; border: 1px solid #3a4a5a; border-radius: 12px;
+      padding: 24px 28px; width: 440px; max-height: 460px; overflow-y: auto;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.5); font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-shortcut-panel h2 { color: #FF6100; font-size: 15px; margin-bottom: 16px; }
+    .ux-shortcut-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 0; border-bottom: 1px solid rgba(58, 74, 90, 0.4);
+    }
+    .ux-shortcut-row:last-child { border-bottom: none; }
+    .ux-shortcut-label { font-size: 13px; color: #F5F3EF; }
+    .ux-shortcut-key {
+      font-size: 11px; background: #1a2332; border: 1px solid #3a4a5a;
+      border-radius: 4px; padding: 3px 8px; color: #8a9aaa; font-family: monospace;
+    }
+
+    /* Help panel */
+    .ux-help-btn {
+      position: fixed; bottom: 24px; right: 24px; z-index: 99990;
+      width: 48px; height: 48px; border-radius: 50%;
+      background: #FF6100; color: #fff; border: none;
+      font-size: 20px; font-weight: 700; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(255, 97, 0, 0.4);
+      transition: transform 200ms, box-shadow 200ms;
+      font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-help-btn:hover { transform: scale(1.08); box-shadow: 0 6px 24px rgba(255, 97, 0, 0.5); }
+    .ux-help-panel {
+      position: fixed; top: 0; right: -360px; bottom: 0; z-index: 99991;
+      width: 340px; background: #232F3E; border-left: 1px solid #3a4a5a;
+      padding: 24px; overflow-y: auto; transition: right 300ms ease;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.3); font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-help-panel.open { right: 0; }
+    .ux-help-panel h3 { color: #FF6100; font-size: 14px; margin: 16px 0 10px; }
+    .ux-help-panel h3:first-child { margin-top: 0; }
+    .ux-help-panel ul { list-style: none; padding: 0; }
+    .ux-help-panel li { padding: 6px 0; font-size: 13px; color: #8a9aaa; border-bottom: 1px solid rgba(58,74,90,0.3); }
+    .ux-help-panel li:last-child { border-bottom: none; }
+    .ux-help-panel .ux-help-close {
+      position: absolute; top: 16px; right: 16px; background: none; border: none;
+      color: #8a9aaa; font-size: 20px; cursor: pointer; padding: 4px;
+    }
+    .ux-help-panel .ux-help-close:hover { color: #F5F3EF; }
+    .ux-help-panel a { color: #FF6100; text-decoration: none; font-size: 13px; }
+    .ux-help-panel a:hover { opacity: 0.8; }
+
+    /* Tour tooltips */
+    .ux-tour-tooltip {
+      position: fixed; z-index: 100002;
+      background: #232F3E; border: 1px solid #FF6100; border-radius: 8px;
+      padding: 16px 20px; max-width: 280px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5); font-family: Inter, system-ui, sans-serif;
+      animation: ux-tooltip-in 200ms ease;
+    }
+    .ux-tour-tooltip p { color: #F5F3EF; font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+    .ux-tour-tooltip .ux-tour-step { color: #8a9aaa; font-size: 11px; margin-bottom: 8px; }
+    .ux-tour-tooltip .ux-tour-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .ux-tour-tooltip .ux-tour-actions button {
+      padding: 6px 14px; border-radius: 4px; font-size: 12px; font-weight: 600;
+      border: none; cursor: pointer;
+    }
+    .ux-tour-tooltip .ux-tour-next { background: #FF6100; color: #fff; }
+    .ux-tour-tooltip .ux-tour-next:hover { background: #e55800; }
+    .ux-tour-tooltip .ux-tour-skip { background: transparent; color: #8a9aaa; border: 1px solid #3a4a5a; }
+    .ux-tour-tooltip .ux-tour-skip:hover { border-color: #8a9aaa; }
+    .ux-tour-arrow {
+      position: absolute; width: 10px; height: 10px; background: #232F3E;
+      border-left: 1px solid #FF6100; border-top: 1px solid #FF6100;
+      transform: rotate(45deg);
+    }
+    @keyframes ux-tooltip-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Error recovery toast */
+    .ux-error-toast {
+      position: fixed; bottom: 80px; right: 24px; z-index: 99997;
+      background: #1a2332; border: 1px solid #ef4444; border-radius: 8px;
+      padding: 14px 20px; color: #F5F3EF; font-size: 13px; max-width: 360px;
+      font-family: Inter, system-ui, sans-serif;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5); animation: ux-toast-in 300ms ease;
+    }
+    .ux-error-toast .ux-error-msg { color: #ef4444; margin-bottom: 8px; font-weight: 500; }
+    .ux-error-toast .ux-retry-btn {
+      background: #ef4444; color: #fff; border: none; border-radius: 4px;
+      padding: 6px 14px; font-weight: 600; font-size: 12px; cursor: pointer;
+    }
+    .ux-error-toast .ux-retry-btn:hover { background: #dc2626; }
+
+    /* Empty search state */
+    .ux-empty-search {
+      text-align: center; padding: 40px 20px; color: #8a9aaa;
+      font-family: Inter, system-ui, sans-serif;
+    }
+    .ux-empty-search h4 { color: #F5F3EF; font-size: 15px; margin-bottom: 12px; }
+    .ux-empty-search ul { list-style: none; padding: 0; font-size: 13px; }
+    .ux-empty-search li { padding: 4px 0; }
+    .ux-empty-search kbd {
+      background: #232F3E; border: 1px solid #3a4a5a; border-radius: 3px;
+      padding: 1px 5px; font-size: 11px; font-family: monospace;
+    }
+  \`;
+  document.head.appendChild(style);
+
+  // ─── 1. Loading Indicator ──────────────────────────────────────────────────
+  var progressBar = document.createElement('div');
+  progressBar.id = 'ux-progress-bar';
+  document.body.appendChild(progressBar);
+
+  var activeRequests = 0;
+  var originalFetch = window.fetch;
+  window.fetch = function() {
+    activeRequests++;
+    progressBar.classList.add('active');
+    return originalFetch.apply(this, arguments).then(function(response) {
+      activeRequests--;
+      if (activeRequests <= 0) { activeRequests = 0; progressBar.classList.remove('active'); }
+      return response;
+    }).catch(function(err) {
+      activeRequests--;
+      if (activeRequests <= 0) { activeRequests = 0; progressBar.classList.remove('active'); }
+      throw err;
+    });
+  };
+
+  // ─── 2. Undo Delete ────────────────────────────────────────────────────────
+  // Intercept delete calls from MCP. We detect if the mcpCall function calls memory_delete.
+  var pendingDeletes = [];
+
+  // Monkey-patch the global mcpCall if it exists, otherwise intercept fetch for delete patterns
+  function setupUndoDelete() {
+    if (typeof window.mcpCall === 'function') {
+      var origMcpCall = window.mcpCall;
+      window.mcpCall = function(toolName, args) {
+        if (toolName === 'memory_delete' || toolName === 'delete_memory') {
+          return new Promise(function(resolve, reject) {
+            var countdown = 5;
+            var cancelled = false;
+            var toastEl = document.createElement('div');
+            toastEl.className = 'ux-undo-toast';
+            toastEl.innerHTML = '<span>Memory deleted &mdash; Undo (<span class="ux-countdown">' + countdown + '</span>s)</span><button class="ux-undo-btn">Undo</button>';
+            document.body.appendChild(toastEl);
+
+            var undoBtn = toastEl.querySelector('.ux-undo-btn');
+            var countdownEl = toastEl.querySelector('.ux-countdown');
+            undoBtn.addEventListener('click', function() {
+              cancelled = true;
+              toastEl.remove();
+              resolve({ undone: true });
+            });
+
+            var interval = setInterval(function() {
+              countdown--;
+              countdownEl.textContent = countdown;
+              if (countdown <= 0) {
+                clearInterval(interval);
+                toastEl.remove();
+                if (!cancelled) {
+                  origMcpCall(toolName, args).then(resolve).catch(reject);
+                }
+              }
+            }, 1000);
+          });
+        }
+        return origMcpCall(toolName, args);
+      };
+    }
+  }
+  // Retry setup after page loads (mcpCall defined in SPA script)
+  setTimeout(setupUndoDelete, 500);
+
+  // ─── 3. Confirmation Modal ─────────────────────────────────────────────────
+  window.confirmAction = function(message) {
+    return new Promise(function(resolve) {
+      var overlay = document.createElement('div');
+      overlay.className = 'ux-modal-overlay';
+      overlay.innerHTML = '<div class="ux-modal"><h3>Confirm Action</h3><p>' + escapeHtml(message) + '</p><div class="ux-modal-actions"><button class="ux-cancel">Cancel</button><button class="ux-confirm">Confirm</button></div></div>';
+      document.body.appendChild(overlay);
+
+      overlay.querySelector('.ux-confirm').addEventListener('click', function() {
+        overlay.remove();
+        resolve(true);
+      });
+      overlay.querySelector('.ux-cancel').addEventListener('click', function() {
+        overlay.remove();
+        resolve(false);
+      });
+      overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) { overlay.remove(); resolve(false); }
+      });
+    });
+  };
+
+  // ─── 4. Empty Content Validation ──────────────────────────────────────────
+  function setupValidation() {
+    var textarea = document.getElementById('store-content');
+    var storeBtn = document.querySelector('[onclick="storeMemory()"]');
+    if (!textarea || !storeBtn) return;
+
+    var validationMsg = document.createElement('div');
+    validationMsg.className = 'ux-validation-msg';
+    validationMsg.textContent = 'Content required';
+    validationMsg.style.display = 'none';
+    textarea.parentElement.appendChild(validationMsg);
+
+    function validate() {
+      var empty = !textarea.value.trim();
+      if (empty) {
+        textarea.classList.add('ux-invalid-border');
+        validationMsg.style.display = 'block';
+        storeBtn.disabled = true;
+        storeBtn.style.opacity = '0.5';
+        storeBtn.style.cursor = 'not-allowed';
+      } else {
+        textarea.classList.remove('ux-invalid-border');
+        validationMsg.style.display = 'none';
+        storeBtn.disabled = false;
+        storeBtn.style.opacity = '1';
+        storeBtn.style.cursor = 'pointer';
+      }
+    }
+
+    textarea.addEventListener('input', validate);
+    validate(); // initial state
+  }
+
+  // ─── 5. Tag Autocomplete ──────────────────────────────────────────────────
+  function setupTagAutocomplete() {
+    var tagsInput = document.getElementById('store-tags');
+    if (!tagsInput) return;
+
+    var allTags = [];
+    var dropdown = null;
+    var activeIndex = -1;
+
+    tagsInput.style.position = 'relative';
+    var wrapper = tagsInput.parentElement;
+    wrapper.style.position = 'relative';
+
+    function createDropdown() {
+      if (dropdown) dropdown.remove();
+      dropdown = document.createElement('div');
+      dropdown.className = 'ux-tag-dropdown';
+      var rect = tagsInput.getBoundingClientRect();
+      dropdown.style.top = (tagsInput.offsetTop + tagsInput.offsetHeight + 2) + 'px';
+      dropdown.style.left = tagsInput.offsetLeft + 'px';
+      dropdown.style.width = tagsInput.offsetWidth + 'px';
+      wrapper.appendChild(dropdown);
+      return dropdown;
+    }
+
+    function hideDropdown() {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      activeIndex = -1;
+    }
+
+    function showMatches(query) {
+      var parts = query.split(',');
+      var current = (parts[parts.length - 1] || '').trim().toLowerCase();
+      if (!current) { hideDropdown(); return; }
+
+      var existing = parts.slice(0, -1).map(function(t) { return t.trim().toLowerCase(); });
+      var matches = allTags.filter(function(t) {
+        return t.toLowerCase().indexOf(current) !== -1 && existing.indexOf(t.toLowerCase()) === -1;
+      }).slice(0, 8);
+
+      if (!matches.length) { hideDropdown(); return; }
+
+      var dd = createDropdown();
+      dd.innerHTML = matches.map(function(t, i) {
+        return '<div class="ux-tag-dropdown-item" data-tag="' + escapeHtml(t) + '">' + escapeHtml(t) + '</div>';
+      }).join('');
+
+      dd.querySelectorAll('.ux-tag-dropdown-item').forEach(function(item) {
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectTag(item.getAttribute('data-tag'));
+        });
+      });
+    }
+
+    function selectTag(tag) {
+      var parts = tagsInput.value.split(',');
+      parts[parts.length - 1] = ' ' + tag;
+      tagsInput.value = parts.join(',') + ', ';
+      tagsInput.dispatchEvent(new Event('input', { bubbles: true }));
+      hideDropdown();
+      tagsInput.focus();
+    }
+
+    tagsInput.addEventListener('focus', function() {
+      fetch('/api/tags').then(function(r) { return r.json(); }).then(function(data) {
+        allTags = (Array.isArray(data) ? data : data.tags || []).map(function(t) {
+          return typeof t === 'string' ? t : t.tag || t.name || '';
+        }).filter(Boolean);
+      }).catch(function() {});
+    });
+
+    tagsInput.addEventListener('input', function() { showMatches(tagsInput.value); });
+    tagsInput.addEventListener('blur', function() { setTimeout(hideDropdown, 200); });
+    tagsInput.addEventListener('keydown', function(e) {
+      if (!dropdown) return;
+      var items = dropdown.querySelectorAll('.ux-tag-dropdown-item');
+      if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = Math.min(activeIndex + 1, items.length - 1); updateActive(items); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); activeIndex = Math.max(activeIndex - 1, 0); updateActive(items); }
+      else if (e.key === 'Enter' && activeIndex >= 0) { e.preventDefault(); selectTag(items[activeIndex].getAttribute('data-tag')); }
+      else if (e.key === 'Escape') { hideDropdown(); }
+    });
+
+    function updateActive(items) {
+      items.forEach(function(item, i) {
+        item.classList.toggle('active', i === activeIndex);
+      });
+    }
+  }
+
+  // ─── 6. Keyboard Shortcut Overlay ─────────────────────────────────────────
+  var shortcutOverlayOpen = false;
+
+  function showShortcutOverlay() {
+    if (shortcutOverlayOpen) return;
+    shortcutOverlayOpen = true;
+    var overlay = document.createElement('div');
+    overlay.className = 'ux-shortcut-overlay';
+    overlay.id = 'ux-shortcut-overlay';
+    overlay.innerHTML = '<div class="ux-shortcut-panel"><h2>Keyboard Shortcuts</h2>'
+      + shortcutRow('Focus search', '/')
+      + shortcutRow('New memory', 'N')
+      + shortcutRow('Close / blur', 'Esc')
+      + shortcutRow('Dashboard', '1')
+      + shortcutRow('Search', '2')
+      + shortcutRow('Store', '3')
+      + shortcutRow('Checkin', '4')
+      + shortcutRow('Ingestion Log', '5')
+      + shortcutRow('Sync', '6')
+      + shortcutRow('Agents', '7')
+      + shortcutRow('Security', '8')
+      + shortcutRow('Status', '9')
+      + shortcutRow('Show shortcuts', 'Ctrl+? / Cmd+K')
+      + shortcutRow('Help panel', '?  (button)')
+      + '</div>';
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) closeShortcutOverlay();
+    });
+  }
+
+  function closeShortcutOverlay() {
+    var el = document.getElementById('ux-shortcut-overlay');
+    if (el) el.remove();
+    shortcutOverlayOpen = false;
+  }
+
+  function shortcutRow(label, key) {
+    return '<div class="ux-shortcut-row"><span class="ux-shortcut-label">' + label + '</span><span class="ux-shortcut-key">' + key + '</span></div>';
+  }
+
+  document.addEventListener('keydown', function(e) {
+    // Ctrl+? or Cmd+K
+    if ((e.ctrlKey && e.key === '?') || (e.metaKey && e.key === 'k') || (e.ctrlKey && e.shiftKey && e.key === '/')) {
+      e.preventDefault();
+      if (shortcutOverlayOpen) closeShortcutOverlay();
+      else showShortcutOverlay();
+      return;
+    }
+    if (e.key === 'Escape' && shortcutOverlayOpen) {
+      closeShortcutOverlay();
+      return;
+    }
+    // Number keys for nav (only when not in input)
+    var tag = document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    var pages = ['dashboard','search','store','checkin','ingest','sync','agents','security','status'];
+    var num = parseInt(e.key);
+    if (num >= 1 && num <= 9 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      var target = pages[num - 1];
+      if (target) location.hash = '#' + target;
+    }
+  });
+
+  // ─── 7. Help Panel ────────────────────────────────────────────────────────
+  var helpBtn = document.createElement('button');
+  helpBtn.className = 'ux-help-btn';
+  helpBtn.textContent = '?';
+  helpBtn.title = 'Help';
+  document.body.appendChild(helpBtn);
+
+  var helpPanel = document.createElement('div');
+  helpPanel.className = 'ux-help-panel';
+  helpPanel.innerHTML = '<button class="ux-help-close">&times;</button>'
+    + '<h3>Keyboard Shortcuts</h3><ul>'
+    + '<li><strong>/</strong> &mdash; Focus search</li>'
+    + '<li><strong>N</strong> &mdash; New memory</li>'
+    + '<li><strong>Esc</strong> &mdash; Close/blur</li>'
+    + '<li><strong>1-9</strong> &mdash; Navigate pages</li>'
+    + '<li><strong>Ctrl+?</strong> &mdash; Command palette</li>'
+    + '</ul>'
+    + '<h3>Quick Guide</h3><ul>'
+    + '<li>Use the search bar or press / to find memories semantically</li>'
+    + '<li>Press N or navigate to Store to save a new memory</li>'
+    + '<li>Check your Briefing page for daily context and activity</li>'
+    + '</ul>'
+    + '<h3>About</h3><ul>'
+    + '<li><a href="https://github.com/shared-brain" target="_blank">About SharedBrain</a></li>'
+    + '</ul>';
+  document.body.appendChild(helpPanel);
+
+  helpBtn.addEventListener('click', function() {
+    helpPanel.classList.toggle('open');
+  });
+  helpPanel.querySelector('.ux-help-close').addEventListener('click', function() {
+    helpPanel.classList.remove('open');
+  });
+
+  // ─── 8. First-Run Tour ────────────────────────────────────────────────────
+  function startTour() {
+    if (localStorage.getItem('sb-tour-done')) return;
+
+    var steps = [
+      { selector: '#global-search', text: 'Use the search bar to find memories semantically', position: 'bottom' },
+      { selector: '.nav-item[href="#store"]', text: 'Press N to quickly store a new memory', position: 'right' },
+      { selector: '.nav-item[href="#checkin"]', text: 'Check your briefing for daily context', position: 'right' },
+      { selector: '.main', text: 'All memories are auto-organized for you', position: 'center' },
+    ];
+
+    var currentStep = 0;
+
+    function showStep(idx) {
+      removeTooltip();
+      if (idx >= steps.length) {
+        localStorage.setItem('sb-tour-done', '1');
+        return;
+      }
+
+      var step = steps[idx];
+      var target = document.querySelector(step.selector);
+      if (!target) { currentStep++; showStep(currentStep); return; }
+
+      var rect = target.getBoundingClientRect();
+      var tooltip = document.createElement('div');
+      tooltip.className = 'ux-tour-tooltip';
+      tooltip.id = 'ux-tour-tooltip';
+      tooltip.innerHTML = '<div class="ux-tour-step">Step ' + (idx + 1) + ' of ' + steps.length + '</div>'
+        + '<p>' + step.text + '</p>'
+        + '<div class="ux-tour-actions">'
+        + '<button class="ux-tour-skip">Skip</button>'
+        + '<button class="ux-tour-next">' + (idx === steps.length - 1 ? 'Done' : 'Next') + '</button>'
+        + '</div>';
+
+      document.body.appendChild(tooltip);
+
+      // Position tooltip
+      var tw = 280;
+      if (step.position === 'bottom') {
+        tooltip.style.top = (rect.bottom + 12) + 'px';
+        tooltip.style.left = Math.max(8, rect.left + rect.width / 2 - tw / 2) + 'px';
+      } else if (step.position === 'right') {
+        tooltip.style.top = (rect.top) + 'px';
+        tooltip.style.left = (rect.right + 12) + 'px';
+      } else {
+        tooltip.style.top = '50%';
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translate(-50%, -50%)';
+      }
+
+      tooltip.querySelector('.ux-tour-next').addEventListener('click', function() {
+        currentStep++;
+        showStep(currentStep);
+      });
+      tooltip.querySelector('.ux-tour-skip').addEventListener('click', function() {
+        removeTooltip();
+        localStorage.setItem('sb-tour-done', '1');
+      });
+    }
+
+    function removeTooltip() {
+      var el = document.getElementById('ux-tour-tooltip');
+      if (el) el.remove();
+    }
+
+    // Start tour after a short delay so page renders first
+    setTimeout(function() { showStep(0); }, 1000);
+  }
+
+  // ─── 9. Empty Search State ────────────────────────────────────────────────
+  function setupEmptySearchState() {
+    // Observe the search results container for changes
+    var resultsEl = document.getElementById('search-results');
+    if (!resultsEl) return;
+
+    var observer = new MutationObserver(function() {
+      // Check if the empty state shows "No results found"
+      var emptyState = resultsEl.querySelector('.empty-state');
+      if (emptyState && emptyState.textContent.indexOf('No results found') !== -1) {
+        emptyState.innerHTML = '<div class="ux-empty-search">'
+          + '<div style="font-size:48px;opacity:0.5;margin-bottom:12px">&#128528;</div>'
+          + '<h4>No results found</h4>'
+          + '<ul>'
+          + '<li>Try broader terms</li>'
+          + '<li>Try different phrasing</li>'
+          + '<li>Store a new memory with <kbd>N</kbd></li>'
+          + '</ul></div>';
+      }
+    });
+    observer.observe(resultsEl, { childList: true, subtree: true });
+  }
+
+  // ─── 10. Error Recovery ───────────────────────────────────────────────────
+  // Override fetch to catch errors and show retry toast
+  var enhancedFetch = window.fetch;
+  window.fetch = function() {
+    var args = arguments;
+    return enhancedFetch.apply(this, args).then(function(response) {
+      if (!response.ok && response.status >= 500) {
+        showErrorToast('Server error: ' + response.status + ' ' + response.statusText, args);
+      }
+      return response;
+    }).catch(function(err) {
+      showErrorToast(err.message || 'Network error', args);
+      throw err;
+    });
+  };
+
+  function showErrorToast(message, fetchArgs) {
+    // Remove existing error toasts
+    var existing = document.querySelector('.ux-error-toast');
+    if (existing) existing.remove();
+
+    var toast = document.createElement('div');
+    toast.className = 'ux-error-toast';
+    toast.innerHTML = '<div class="ux-error-msg">' + escapeHtml(message) + '</div>'
+      + '<button class="ux-retry-btn">Retry</button>';
+    document.body.appendChild(toast);
+
+    toast.querySelector('.ux-retry-btn').addEventListener('click', function() {
+      toast.remove();
+      enhancedFetch.apply(window, fetchArgs).catch(function() {});
+    });
+
+    setTimeout(function() { if (toast.parentNode) toast.remove(); }, 8000);
+  }
+
+  // ─── Utility ──────────────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    if (!s) return '';
+    var div = document.createElement('div');
+    div.textContent = String(s);
+    return div.innerHTML;
+  }
+
+  // ─── Initialize all enhancements after DOM ready ──────────────────────────
+  function init() {
+    setupValidation();
+    setupTagAutocomplete();
+    setupEmptySearchState();
+    startTour();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+`;

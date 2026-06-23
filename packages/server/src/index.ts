@@ -15,6 +15,7 @@ import { registerOnboarding } from './onboarding.js';
 import { registerOnboardingDemo } from './onboarding-demo.js';
 import { registerApp } from './app.js';
 import { registerUXResearch } from './ux-research.js';
+import { registerUXEnhancements } from './ux-enhancements.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -404,6 +405,12 @@ console.log(`[app] SharedBrain SPA → http://${host}:${port}/app`);
 // Wire up UX research tools
 registerUXResearch(app);
 console.log(`[ux-research] Research tools → /research/analytics, /research/heuristics, /research/test`);
+
+// Wire up UX enhancements (serves /ux-enhance.js for SPA injection)
+(app as any).locals = (app as any).locals || {};
+(app as any).locals.store = store;
+registerUXEnhancements(app);
+console.log(`[ux-enhance] UX enhancements script → /ux-enhance.js`);
 
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);

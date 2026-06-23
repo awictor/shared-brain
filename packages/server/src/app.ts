@@ -909,5 +909,6 @@ function isInputFocused() {
   return tag === 'input' || tag === 'textarea' || tag === 'select';
 }
 </script>
+<script src="/ux-enhance.js"></script>
 </body>
 </html>`;
