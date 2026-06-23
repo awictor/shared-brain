@@ -12,8 +12,45 @@ import type { Store } from '../mcp/handler.js';
 interface TransportDeps {
   handler: MemoryHandler;
   store: Store;
-  registerTools: (server: McpServer, deps: { handler: MemoryHandler }) => void;
+  registerTools: (server: McpServer, deps: any) => void;
   registerResources: (server: McpServer, deps: { store: Store }) => void;
+  toolDeps?: Record<string, unknown>;
+}
+
+function getNavBar(activePage: string = ''): string {
+  const links = [
+    { href: '/', label: 'Home', id: 'home' },
+    { href: '/ui', label: 'Dashboard', id: 'ui' },
+    { href: '/status', label: 'Status', id: 'status' },
+    { href: '/setup', label: 'Setup', id: 'setup' },
+    { href: '/demo/organizer', label: 'Organizer', id: 'organizer' },
+    { href: '/demo/ingest', label: 'Ingest', id: 'ingest' },
+    { href: '/demo/sync', label: 'Sync', id: 'sync' },
+    { href: '/demo/identity', label: 'Identity', id: 'identity' },
+    { href: '/demo/security', label: 'Security', id: 'security' },
+    { href: '/demo/checkin', label: 'Checkin', id: 'checkin' },
+  ];
+  const navItems = links.map(l => {
+    const isActive = l.id === activePage;
+    return `<a href="${l.href}" class="nav-link${isActive ? ' nav-active' : ''}">${l.label}</a>`;
+  }).join('');
+
+  return `<nav class="shared-nav">
+  <div class="nav-brand"><a href="/">Shared<span>Brain</span></a></div>
+  <button class="nav-hamburger" onclick="document.querySelector('.nav-links').classList.toggle('nav-open')" aria-label="Menu">&#9776;</button>
+  <div class="nav-links">${navItems}</div>
+</nav>
+<style>
+.shared-nav{display:flex;align-items:center;gap:16px;padding:10px 24px;background:#1a2530;border-bottom:2px solid #2a3a4a;position:sticky;top:0;z-index:1000}
+.nav-brand a{font-size:18px;font-weight:700;color:#F5F3EF;text-decoration:none}
+.nav-brand a span{color:#FF6100}
+.nav-links{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.nav-link{font-size:13px;padding:6px 12px;color:#a0aab4;text-decoration:none;border-radius:4px;border-bottom:2px solid transparent;transition:color .2s,border-color .2s}
+.nav-link:hover{color:#F5F3EF;background:#2a3a4a}
+.nav-active{color:#FF6100!important;border-bottom-color:#FF6100}
+.nav-hamburger{display:none;background:none;border:none;color:#F5F3EF;font-size:22px;cursor:pointer;margin-left:auto;padding:4px 8px}
+@media(max-width:768px){.nav-hamburger{display:block}.nav-links{display:none;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:#1a2530;padding:8px 16px;border-bottom:2px solid #2a3a4a}.nav-links.nav-open{display:flex}}
+</style>`;
 }
 
 export function createHttpTransport(deps: TransportDeps, app: Application): void {
@@ -22,10 +59,15 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
       name: 'shared-brain',
       version: '0.1.0',
     });
-    deps.registerTools(server, { handler: deps.handler });
+    deps.registerTools(server, { handler: deps.handler, store: deps.store, ...deps.toolDeps });
     deps.registerResources(server, { store: deps.store });
     return server;
   };
+
+  // Landing page → redirect to dashboard
+  app.get('/', (_req: Request, res: Response) => {
+    res.redirect('/ui');
+  });
 
   app.post('/mcp', async (req: Request, res: Response) => {
     const server = createMcpServer();
@@ -84,6 +126,142 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
   });
 }
 
+const LANDING_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SharedBrain — Persistent Memory for AI Agents</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#232F3E;--surface:#2a3a4a;--border:#3a4a5a;--text:#F5F3EF;--muted:#a0aab4;--accent:#FF6100;--accent-dim:#cc4e00;--success:#10b981;--card:#1e2d3d;--hover:#2f4050}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.landing-wrap{max-width:1100px;margin:0 auto;padding:40px 24px 60px}
+.hero{text-align:center;margin-bottom:48px}
+.hero-logo{font-size:42px;font-weight:800;margin-bottom:8px}
+.hero-logo span{color:var(--accent)}
+.hero-sub{color:var(--muted);font-size:16px;max-width:520px;margin:0 auto}
+.stats-row{display:flex;justify-content:center;gap:32px;margin:28px 0 40px;flex-wrap:wrap}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 28px;text-align:center;min-width:140px}
+.stat-card .stat-value{font-size:28px;font-weight:700;color:var(--accent)}
+.stat-card .stat-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.nav-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:48px}
+.nav-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;display:flex;align-items:flex-start;gap:16px;transition:border-color .2s,box-shadow .2s,transform .15s;text-decoration:none;color:var(--text)}
+.nav-card:hover{border-color:var(--accent);box-shadow:0 0 20px rgba(255,97,0,.12);transform:translateY(-2px);text-decoration:none}
+.nav-card-icon{font-size:28px;flex-shrink:0;width:44px;height:44px;display:flex;align-items:center;justify-content:center;background:var(--surface);border-radius:10px}
+.nav-card-body{flex:1;min-width:0}
+.nav-card-title{font-size:15px;font-weight:600;margin-bottom:4px}
+.nav-card-desc{font-size:13px;color:var(--muted);line-height:1.4}
+.getting-started{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:28px 32px;margin-bottom:32px}
+.getting-started h2{font-size:18px;font-weight:700;margin-bottom:12px;color:var(--text)}
+.getting-started p{font-size:14px;color:var(--muted);margin-bottom:16px}
+.config-block{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;font-family:ui-monospace,monospace;font-size:12px;color:var(--text);position:relative;overflow-x:auto;line-height:1.6;white-space:pre}
+.copy-btn{position:absolute;top:8px;right:8px;background:var(--accent);border:none;color:#fff;font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:600}
+.copy-btn:hover{background:var(--accent-dim)}
+.footer{text-align:center;padding:24px 0;border-top:1px solid var(--border);color:var(--muted);font-size:12px}
+.footer a{color:var(--accent)}
+@media(max-width:640px){.nav-grid{grid-template-columns:1fr}.stats-row{gap:16px}.stat-card{min-width:100px;padding:12px 16px}}
+</style>
+</head>
+<body>
+${getNavBar('home')}
+<div class="landing-wrap">
+  <div class="hero">
+    <div class="hero-logo">Shared<span>Brain</span></div>
+    <p class="hero-sub">Persistent, cross-agent memory layer for AI systems. Store, search, and sync context across sessions and agents via MCP.</p>
+  </div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-value" id="s-memories">--</div><div class="stat-label">Memories</div></div>
+    <div class="stat-card"><div class="stat-value" id="s-agents">--</div><div class="stat-label">Agents</div></div>
+    <div class="stat-card"><div class="stat-value" id="s-activity">--</div><div class="stat-label">Last Activity</div></div>
+  </div>
+  <div class="nav-grid">
+    <a href="/ui" class="nav-card"><div class="nav-card-icon">&#128200;</div><div class="nav-card-body"><div class="nav-card-title">Memory Dashboard</div><div class="nav-card-desc">Browse, search, and store memories with full filtering</div></div></a>
+    <a href="/demo/organizer" class="nav-card"><div class="nav-card-icon">&#129702;</div><div class="nav-card-body"><div class="nav-card-title">Auto-Organization</div><div class="nav-card-desc">Watch memories self-organize with smart tagging and clustering</div></div></a>
+    <a href="/demo/ingest" class="nav-card"><div class="nav-card-icon">&#128229;</div><div class="nav-card-body"><div class="nav-card-title">Passive Ingestion</div><div class="nav-card-desc">Capture context automatically from conversations and tools</div></div></a>
+    <a href="/demo/sync" class="nav-card"><div class="nav-card-icon">&#128259;</div><div class="nav-card-body"><div class="nav-card-title">Multi-User Sync</div><div class="nav-card-desc">Real-time conflict-free sync between multiple agents</div></div></a>
+    <a href="/demo/identity" class="nav-card"><div class="nav-card-icon">&#128101;</div><div class="nav-card-body"><div class="nav-card-title">Cross-Agent Identity</div><div class="nav-card-desc">Unified memory graph across different agent identities</div></div></a>
+    <a href="/demo/security" class="nav-card"><div class="nav-card-icon">&#128274;</div><div class="nav-card-body"><div class="nav-card-title">Security &amp; Audit</div><div class="nav-card-desc">Access control, encryption, and full audit trail</div></div></a>
+    <a href="/demo/checkin" class="nav-card"><div class="nav-card-icon">&#128218;</div><div class="nav-card-body"><div class="nav-card-title">Context Briefing</div><div class="nav-card-desc">Start sessions with intelligent context summaries</div></div></a>
+    <a href="/setup" class="nav-card"><div class="nav-card-icon">&#9881;&#65039;</div><div class="nav-card-body"><div class="nav-card-title">First-Run Setup</div><div class="nav-card-desc">Configure storage, sync, and agent registration</div></div></a>
+    <a href="/status" class="nav-card"><div class="nav-card-icon">&#128994;</div><div class="nav-card-body"><div class="nav-card-title">System Status</div><div class="nav-card-desc">Health checks, uptime, and performance metrics</div></div></a>
+  </div>
+  <div class="getting-started">
+    <h2>Getting Started</h2>
+    <p>Add SharedBrain to your MCP client config to give any agent persistent memory:</p>
+    <div class="config-block"><button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('mcp-config').textContent)">Copy</button><code id="mcp-config">{
+  "mcpServers": {
+    "shared-brain": {
+      "url": "http://localhost:3100/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}</code></div>
+  </div>
+  <div class="footer">SharedBrain v0.1.0 &mdash; <a href="https://github.com/shared-brain/shared-brain" target="_blank">GitHub</a></div>
+</div>
+<script>
+(async function loadStats() {
+  try {
+    const health = await fetch('/health').then(r => r.json());
+    document.getElementById('s-activity').textContent = health.timestamp ? new Date(health.timestamp).toLocaleTimeString() : 'now';
+  } catch { document.getElementById('s-activity').textContent = '--'; }
+  try {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'sync_status', arguments: {} } });
+    const res = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body });
+    const ct = res.headers.get('content-type') || '';
+    let data;
+    if (ct.includes('text/event-stream')) {
+      const text = await res.text();
+      for (const line of text.split('\\n')) {
+        if (line.startsWith('data: ')) { try { data = JSON.parse(line.slice(6)); } catch {} }
+      }
+    } else { data = await res.json(); }
+    if (data?.result?.content) {
+      for (const c of data.result.content) {
+        if (c.type === 'text') {
+          try {
+            const info = JSON.parse(c.text);
+            document.getElementById('s-memories').textContent = info.totalMemories ?? info.memories ?? '--';
+            document.getElementById('s-agents').textContent = info.connectedAgents ?? info.agents ?? '1';
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  // Fallback: try memory_list for count
+  if (document.getElementById('s-memories').textContent === '--') {
+    try {
+      const body = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'memory_list', arguments: {} } });
+      const res = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body });
+      const ct = res.headers.get('content-type') || '';
+      let data;
+      if (ct.includes('text/event-stream')) {
+        const text = await res.text();
+        for (const line of text.split('\\n')) {
+          if (line.startsWith('data: ')) { try { data = JSON.parse(line.slice(6)); } catch {} }
+        }
+      } else { data = await res.json(); }
+      if (data?.result?.content) {
+        for (const c of data.result.content) {
+          if (c.type === 'text') {
+            try {
+              const arr = JSON.parse(c.text);
+              document.getElementById('s-memories').textContent = Array.isArray(arr) ? arr.length : (arr.memories?.length ?? '--');
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+  }
+  if (document.getElementById('s-agents').textContent === '--') document.getElementById('s-agents').textContent = '1';
+})();
+</script>
+</body>
+</html>`;
+
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -99,7 +277,7 @@ input,select,textarea,button{font:inherit;border-radius:6px;border:1px solid var
 input:focus,select:focus,textarea:focus{border-color:var(--accent)}
 button{cursor:pointer;background:var(--accent);border:none;color:#fff;font-weight:600;padding:10px 20px;transition:background .2s}
 button:hover{background:var(--accent-dim)}
-.layout{display:grid;grid-template-columns:240px 1fr;grid-template-rows:auto auto 1fr;min-height:100vh;gap:0}
+.layout{display:grid;grid-template-columns:240px 1fr;grid-template-rows:auto auto 1fr;min-height:calc(100vh - 46px);gap:0}
 .stats-bar{grid-column:1/-1;display:flex;gap:24px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border);align-items:center}
 .stat{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
 .stat b{color:var(--text);font-size:15px}
@@ -147,6 +325,7 @@ button:hover{background:var(--accent-dim)}
 </style>
 </head>
 <body>
+${getNavBar('ui')}
 <div class="layout">
   <div class="stats-bar">
     <div class="stat">Memories: <b id="stat-total">—</b></div>

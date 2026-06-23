@@ -18,6 +18,7 @@ export interface ServerConfig {
   dbPath: string;
   authToken?: string;
   modelsPath?: string;
+  toolDeps?: Record<string, unknown>;
 }
 
 export interface ServerInstance {
@@ -48,7 +49,7 @@ export async function createServer(
     app.use('/mcp', authMiddleware(config.authToken));
   }
 
-  createHttpTransport({ handler, store, registerTools, registerResources }, app);
+  createHttpTransport({ handler, store, registerTools, registerResources, toolDeps: config.toolDeps }, app);
 
   return { app, store, embeddings, vectorIndex, handler };
 }

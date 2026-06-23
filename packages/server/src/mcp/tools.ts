@@ -1,19 +1,22 @@
 /**
- * MCP tool registration — all 10 SharedBrain tools.
+ * MCP tool registration — all 11 SharedBrain tools.
  *
  * Each tool has a Zod-validated input schema and delegates to MemoryHandler.
  */
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { MemoryHandler } from './handler.js';
+import type { MemoryHandler, Store } from './handler.js';
+import type { AutoEnhancer } from '../auto-enhance.js';
 
 export interface ToolDependencies {
   handler: MemoryHandler;
+  store: Store;
+  autoEnhancer?: AutoEnhancer;
 }
 
 export function registerTools(server: McpServer, deps: ToolDependencies): void {
-  const { handler } = deps;
+  const { handler, store, autoEnhancer } = deps;
 
   // ─── memory_store ──────────────────────────────────────────────────────────
 
@@ -37,7 +40,9 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
       }).optional().describe('Attribution for this memory.'),
     },
     async (params) => {
-      const result = await handler.handleStore(params);
+      // Auto-enhance: fill in title/type/tags/scope/relations if not provided
+      const enhanced = autoEnhancer ? await autoEnhancer.enhance(params) : params;
+      const result = await handler.handleStore(enhanced);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -250,6 +255,89 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
       const result = await handler.handleExport(params);
       return {
         content: [{ type: 'text' as const, text: result.data }],
+      };
+    },
+  );
+
+  // ─── memory_checkin ────────────────────────────────────────────────────────
+
+  server.tool(
+    'memory_checkin',
+    'Load context at conversation start. Returns recent activity, active projects, pending actions, and cross-agent updates. Call this at the beginning of a session to get oriented.',
+    {
+      limit: z.number().default(5).describe('How many recent memories to include'),
+      since: z.string().optional().describe('Only show activity since this ISO date'),
+    },
+    async (params) => {
+      const now = new Date();
+      const sinceDate = params.since || new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const limit = params.limit ?? 5;
+
+      // Last N memories (across all agents)
+      const recentResult = await handler.handleList({
+        sort: 'newest',
+        limit,
+        offset: 0,
+      });
+
+      // Memories from today (or since the provided date)
+      const todayResult = await handler.handleList({
+        sort: 'newest',
+        limit: 50,
+        offset: 0,
+        filters: { since: sinceDate },
+      });
+
+      // Active projects: tags with > 3 memories
+      const allTags = await store.getAllTags();
+      const activeProjects = allTags.filter((t) => t.count > 3);
+
+      // Pending action items: type=procedure or tag containing "action"
+      const procedureResult = await handler.handleList({
+        sort: 'newest',
+        limit: 20,
+        offset: 0,
+        filters: { types: ['procedure'] },
+      });
+      const actionTagResult = await handler.handleList({
+        sort: 'newest',
+        limit: 20,
+        offset: 0,
+        filters: { tags: ['action', 'action-item', 'todo', 'task'] },
+      });
+      const actionIds = new Set<string>();
+      const pendingActions = [...procedureResult.memories, ...actionTagResult.memories].filter((m) => {
+        if (actionIds.has(m.id)) return false;
+        actionIds.add(m.id);
+        return true;
+      });
+
+      // Cross-agent activity: memories stored by non-local agents
+      const crossAgentResult = await handler.handleList({
+        sort: 'newest',
+        limit: 20,
+        offset: 0,
+      });
+      const crossAgentActivity = crossAgentResult.memories.filter(
+        (m) => m.source?.agent && m.source.agent !== 'local',
+      );
+
+      // Sync status for total count + last sync time
+      const syncStatus = await handler.handleSyncStatus();
+
+      const checkin = {
+        recentMemories: recentResult.memories,
+        todayMemories: todayResult.memories,
+        activeProjects,
+        pendingActions,
+        crossAgentActivity,
+        totalCount: recentResult.total,
+        lastSyncTime: syncStatus.lastSyncTime,
+        generatedAt: now.toISOString(),
+      };
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(checkin) }],
       };
     },
   );

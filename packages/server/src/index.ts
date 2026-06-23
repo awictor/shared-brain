@@ -1,12 +1,18 @@
 import { createServer } from './server.js';
 import { Organizer } from './organizer.js';
 import { registerOrganizerDemo } from './organizer-demo.js';
+import { AutoEnhancer } from './auto-enhance.js';
+import { registerCheckinDemo } from './checkin-demo.js';
 import { IngestEngine } from './ingest.js';
 import { registerIngestDemo } from './ingest-demo.js';
 import { registerSyncDemo } from './sync-demo.js';
 import { IdentityManager } from './identity.js';
 import { registerIdentityDemo } from './identity-demo.js';
+import { SecurityLayer } from './security.js';
+import { registerSecurityDemo } from './security-demo.js';
 import { HNSWIndex } from './hnsw.js';
+import { registerOnboarding } from './onboarding.js';
+import { registerOnboardingDemo } from './onboarding-demo.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -320,13 +326,38 @@ const store = new SqlJsStore(dbPath);
 const embeddings = new OnnxEmbeddingEngine();
 const vectorIndex = new PersistentHNSWIndex(store);
 
-const { app } = await createServer(
-  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined },
+// Create organizer + auto-enhancer before server so MCP tools can use them
+const organizer = new Organizer(embeddings, vectorIndex, store);
+const autoEnhancer = new AutoEnhancer(organizer, store, embeddings, vectorIndex);
+
+const { app, handler } = await createServer(
+  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined, toolDeps: { autoEnhancer } },
   { store, embeddings, vectorIndex },
 );
 
 // Load vectors from persisted embeddings into HNSW index
 await vectorIndex.loadFromStore();
+
+// Wire up security layer (zero-config)
+const security = new SecurityLayer(store.db);
+const { token: securityToken } = security.initialize();
+
+// Apply security middleware to all routes
+app.use(security.securityHeadersMiddleware());
+app.use(security.auditMiddleware());
+
+// Route-specific rate limits
+app.use('/mcp', security.rateLimitMiddleware(100, 60_000));       // 100/min for MCP
+app.use('/ingest', security.rateLimitMiddleware(20, 60_000));     // 20/min for ingest
+app.use('/setup', security.rateLimitMiddleware(10, 60_000));      // 10/min for setup
+
+// Input sanitization for write endpoints
+app.use('/mcp', security.sanitizeMiddleware());
+app.use('/ingest', security.sanitizeMiddleware());
+
+// Security demo dashboard
+registerSecurityDemo(app, security);
+console.log(`[security] Security dashboard → http://${host}:${port}/demo/security`);
 
 // Wire up cross-agent identity system
 const identityManager = new IdentityManager(store.db);
@@ -334,10 +365,13 @@ identityManager.initialize();
 registerIdentityDemo(app, identityManager);
 console.log(`[identity] Cross-agent identity system ready → http://${host}:${port}/demo/identity`);
 
-// Wire up the auto-organizer + demo UI
-const organizer = new Organizer(embeddings, vectorIndex, store);
+// Wire up the auto-organizer + demo UI (organizer already created above for AutoEnhancer)
 registerOrganizerDemo(app, organizer);
 console.log(`[organizer] Auto-organization layer ready → http://${host}:${port}/demo/organizer`);
+
+// Wire up the checkin demo UI
+registerCheckinDemo(app, handler, store);
+console.log(`[checkin] Context briefing ready → http://${host}:${port}/demo/checkin`);
 
 // Wire up the passive ingest engine + demo UI
 const ingestToken = process.env['INGEST_TOKEN'] ?? 'dev-ingest-token';
@@ -354,6 +388,12 @@ console.log(`[ingest] Demo UI → http://${host}:${port}/demo/ingest`);
 // Wire up multi-user sync demo
 registerSyncDemo(app, embeddings);
 console.log(`[sync-demo] Multi-user sync demonstration → http://${host}:${port}/demo/sync`);
+
+// Wire up onboarding system (zero-config setup, auto-detect, auto-organize, status page)
+registerOnboarding(app, { store, identityManager, vectorIndex, embeddings, dbPath });
+registerOnboardingDemo(app, { store, identityManager, vectorIndex });
+console.log(`[onboarding] Setup wizard → http://${host}:${port}/setup`);
+console.log(`[onboarding] Status page → http://${host}:${port}/status`);
 
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);
