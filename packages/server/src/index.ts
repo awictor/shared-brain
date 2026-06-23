@@ -4,6 +4,9 @@ import { registerOrganizerDemo } from './organizer-demo.js';
 import { IngestEngine } from './ingest.js';
 import { registerIngestDemo } from './ingest-demo.js';
 import { registerSyncDemo } from './sync-demo.js';
+import { IdentityManager } from './identity.js';
+import { registerIdentityDemo } from './identity-demo.js';
+import { HNSWIndex } from './hnsw.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -61,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_operations_synced ON operations(synced);
 `;
 
 class SqlJsStore implements Store {
-  private db: any = null;
+  public db: any = null;
   private dbPath: string;
 
   constructor(dbPath: string) {
@@ -236,14 +239,15 @@ class SqlJsStore implements Store {
   }
 }
 
-// ─── Vector Index (in-memory, rebuilt from DB on startup) ─────────────────────
+// ─── Vector Index (HNSW, rebuilt from DB on startup) ─────────────────────────
 
-class PersistentVectorIndex implements VectorIndex {
-  private vectors: Map<string, Float32Array> = new Map();
+class PersistentHNSWIndex implements VectorIndex {
+  private hnsw: HNSWIndex;
   private store: SqlJsStore;
 
   constructor(store: SqlJsStore) {
     this.store = store;
+    this.hnsw = new HNSWIndex();
   }
 
   async loadFromStore(): Promise<void> {
@@ -251,34 +255,27 @@ class PersistentVectorIndex implements VectorIndex {
     let loaded = 0;
     for (const m of memories) {
       if (m.embedding) {
-        this.vectors.set(m.id, m.embedding);
+        this.hnsw.add(m.id, m.embedding);
         loaded++;
       }
     }
-    if (loaded > 0) console.log(`[vectors] Loaded ${loaded} vectors from database.`);
+    if (loaded > 0) console.log(`[vectors] HNSW index loaded ${loaded} vectors from database.`);
   }
 
   add(id: string, vector: Float32Array): void {
-    this.vectors.set(id, vector);
+    this.hnsw.add(id, vector);
   }
 
   remove(id: string): void {
-    this.vectors.delete(id);
+    this.hnsw.remove(id);
   }
 
   search(query: Float32Array, k: number, threshold: number = 0.0): Array<{ id: string; score: number }> {
-    const results: Array<{ id: string; score: number }> = [];
-    for (const [id, vector] of this.vectors) {
-      let dot = 0;
-      for (let i = 0; i < query.length; i++) dot += query[i] * vector[i];
-      if (dot >= threshold) results.push({ id, score: dot });
-    }
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, k);
+    return this.hnsw.search(query, k, threshold);
   }
 
   size(): number {
-    return this.vectors.size;
+    return this.hnsw.size();
   }
 }
 
@@ -321,15 +318,21 @@ const dbPath = process.env['DB_PATH'] ?? 'C:/Users/awictor/shared-brain/data/bra
 
 const store = new SqlJsStore(dbPath);
 const embeddings = new OnnxEmbeddingEngine();
-const vectorIndex = new PersistentVectorIndex(store);
+const vectorIndex = new PersistentHNSWIndex(store);
 
 const { app } = await createServer(
   { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined },
   { store, embeddings, vectorIndex },
 );
 
-// Load vectors from persisted embeddings after store is initialized
+// Load vectors from persisted embeddings into HNSW index
 await vectorIndex.loadFromStore();
+
+// Wire up cross-agent identity system
+const identityManager = new IdentityManager(store.db);
+identityManager.initialize();
+registerIdentityDemo(app, identityManager);
+console.log(`[identity] Cross-agent identity system ready → http://${host}:${port}/demo/identity`);
 
 // Wire up the auto-organizer + demo UI
 const organizer = new Organizer(embeddings, vectorIndex, store);
