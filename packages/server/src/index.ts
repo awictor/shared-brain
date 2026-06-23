@@ -11,6 +11,7 @@ import { registerIdentityDemo } from './identity-demo.js';
 import { SecurityLayer } from './security.js';
 import { registerSecurityDemo } from './security-demo.js';
 import { HNSWIndex } from './hnsw.js';
+import { registerTeamOnboarding } from './onboard-team.js';
 import { registerOnboarding } from './onboarding.js';
 import { registerOnboardingDemo } from './onboarding-demo.js';
 import { registerApp } from './app.js';
@@ -411,6 +412,46 @@ console.log(`[ux-research] Research tools → /research/analytics, /research/heu
 (app as any).locals.store = store;
 registerUXEnhancements(app);
 console.log(`[ux-enhance] UX enhancements script → /ux-enhance.js`);
+
+// Wire up team onboarding page
+registerTeamOnboarding(app);
+console.log(`[team] Team join page → http://${host}:${port}/join`);
+
+// Serve the proxy script for teammates to download
+app.get('/proxy.js', (_req, res) => {
+  const serverUrl = process.env['PUBLIC_URL'] ?? `http://${host}:${port}`;
+  const script = `#!/usr/bin/env node
+/**
+ * SharedBrain MCP Proxy — connects your AI agent to the team brain.
+ * Points to: ${serverUrl}/mcp
+ */
+const MCP_URL = '${serverUrl}/mcp';
+let buffer = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  const lines = buffer.split('\\n');
+  buffer = lines.pop();
+  for (const line of lines) { if (line.trim()) handleMessage(line); }
+});
+process.stdin.on('end', () => { if (buffer.trim()) handleMessage(buffer); });
+async function handleMessage(line) {
+  try {
+    JSON.parse(line);
+    const resp = await fetch(MCP_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body: line });
+    const text = await resp.text();
+    const dataLines = text.split('\\n').filter(l => l.startsWith('data: '));
+    for (const dl of dataLines) process.stdout.write(dl.slice(6) + '\\n');
+    if (!dataLines.length && text.trim()) process.stdout.write(text.trim() + '\\n');
+  } catch (err) {
+    try { const p = JSON.parse(line); process.stdout.write(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: String(err.message || err) }, id: p.id ?? null }) + '\\n'); }
+    catch { process.stderr.write('Proxy error: ' + err + '\\n'); }
+  }
+}
+`;
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(script);
+});
 
 app.listen(port, host, () => {
   console.log(`[shared-brain] MCP server running → http://${host}:${port}/mcp`);
