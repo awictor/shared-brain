@@ -11,3 +11,5 @@ data/
 coverage/
 *.tsbuildinfo
 .DS_Store
+data/
+server.log
