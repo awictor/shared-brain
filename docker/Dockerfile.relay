@@ -1,0 +1,57 @@
+# Stage 1: Build
+FROM node:20-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+WORKDIR /app
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY tsconfig.base.json ./
+COPY turbo.json ./
+
+# Copy package manifests for dependency resolution
+COPY packages/core/package.json packages/core/
+COPY packages/sync/package.json packages/sync/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# Copy source code
+COPY packages/core/ packages/core/
+COPY packages/sync/ packages/sync/
+
+# Build
+RUN pnpm --filter @shared-brain/core build && \
+    pnpm --filter @shared-brain/sync build
+
+# Stage 2: Production
+FROM node:20-alpine AS production
+
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
+COPY packages/core/package.json packages/core/
+COPY packages/sync/package.json packages/sync/
+
+# Install production dependencies only
+RUN pnpm install --prod --frozen-lockfile || pnpm install --prod
+
+# Copy built artifacts
+COPY --from=builder /app/packages/core/dist packages/core/dist
+COPY --from=builder /app/packages/sync/dist packages/sync/dist
+
+# Expose relay port
+EXPOSE 3200
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3200/health || exit 1
+
+# Run relay server
+ENTRYPOINT ["node", "packages/sync/dist/relay/relay-server.js"]

@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: sharedbrain-postgres
+    environment:
+      POSTGRES_DB: sharedbrain
+      POSTGRES_USER: sharedbrain
+      POSTGRES_PASSWORD: sharedbrain-dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sharedbrain"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  relay:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.relay
+    container_name: sharedbrain-relay
+    environment:
+      PORT: "3200"
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_DATABASE: sharedbrain
+      PG_USER: sharedbrain
+      PG_PASSWORD: sharedbrain-dev
+      SYNC_AUTH_TOKEN: dev-sync-token
+    ports:
+      - "3200:3200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:latest
+    container_name: sharedbrain-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    profiles:
+      - debug
+
+volumes:
+  pgdata:
