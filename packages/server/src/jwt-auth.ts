@@ -14,6 +14,7 @@
 
 import jwt from 'jsonwebtoken';
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
+import { writeFileSync as fsWriteSync } from 'node:fs';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 
 export interface JWTPayload {
@@ -117,10 +118,8 @@ export class JWTAuth {
 
         // Persist migration
         const data = this.db.export();
-        const fs = require('fs');
-        const path = require('path');
         const dbPath = process.env['DB_PATH'] ?? 'C:/Users/awictor/shared-brain/data/brain.db';
-        fs.writeFileSync(dbPath, Buffer.from(data));
+        fsWriteSync(dbPath, Buffer.from(data));
 
         console.log('[jwt-auth] Migrated JWT secret to encrypted storage.');
       }
@@ -146,12 +145,8 @@ export class JWTAuth {
 
     // Persist to disk (sql.js in-memory requires explicit save)
     const data = this.db.export();
-    const fs = require('fs');
-    const path = require('path');
     const dbPath = process.env['DB_PATH'] ?? 'C:/Users/awictor/shared-brain/data/brain.db';
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(dbPath, Buffer.from(data));
+    fsWriteSync(dbPath, Buffer.from(data));
 
     console.log('[jwt-auth] Generated and stored new encrypted JWT secret.');
     return this.secret;
@@ -271,10 +266,8 @@ export class JWTAuth {
 
       // Persist to disk
       const data = this.db.export();
-      const fs = require('fs');
-      const path = require('path');
       const dbPath = process.env['DB_PATH'] ?? 'C:/Users/awictor/shared-brain/data/brain.db';
-      fs.writeFileSync(dbPath, Buffer.from(data));
+      fsWriteSync(dbPath, Buffer.from(data));
 
       console.log(`[jwt-auth] Token revoked: jti=${decoded.jti}, userId=${decoded.userId}`);
       return true;
