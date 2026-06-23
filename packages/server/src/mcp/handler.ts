@@ -174,6 +174,7 @@ export class MemoryHandler {
     private readonly store: Store,
     private readonly embeddings: Embeddings,
     private readonly vectorIndex: VectorIndex,
+    private readonly versionManager?: any, // VersionManager (any to avoid circular import)
     currentUserId?: string,
     currentUserName?: string,
   ) {
@@ -232,6 +233,11 @@ export class MemoryHandler {
 
     await this.store.createMemory(memory);
     this.vectorIndex.add(id, embedding);
+
+    // Record version
+    if (this.versionManager) {
+      this.versionManager.recordVersion(memory, this._currentUserId, 'created');
+    }
 
     // Log the create operation
     const op: MemoryOperation = {
@@ -367,6 +373,14 @@ export class MemoryHandler {
 
     await this.store.updateMemory(params.id, updates);
 
+    // Record version (fetch updated memory)
+    if (this.versionManager) {
+      const updated = await this.store.getMemory(params.id);
+      if (updated) {
+        this.versionManager.recordVersion(updated, this._currentUserId, 'updated');
+      }
+    }
+
     // Log operation
     const op: MemoryOperation = {
       id: randomUUID(),
@@ -404,6 +418,12 @@ export class MemoryHandler {
 
     await this.store.updateMemory(params.id, { deleted: true, updatedAt: now, hlc });
     this.vectorIndex.remove(params.id);
+
+    // Record version
+    if (this.versionManager) {
+      const deleted = { ...existing, deleted: true, updatedAt: now, hlc };
+      this.versionManager.recordVersion(deleted, this._currentUserId, 'deleted');
+    }
 
     // Log operation
     const op: MemoryOperation = {

@@ -308,6 +308,248 @@ const UX_ENHANCE_JS = `(function() {
     .ux-user-border {
       border-left: 3px solid var(--ux-user-color, #3a4a5a) !important;
     }
+
+    /* ─── Mobile Responsive Styles ──────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      /* 1. Responsive Sidebar */
+      .sidebar, nav.sidebar, aside.sidebar, [class*="sidebar"] {
+        position: fixed !important;
+        top: 0;
+        left: -280px;
+        width: 280px;
+        height: 100vh;
+        z-index: 100005;
+        transition: left 300ms ease;
+        box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+      }
+      .sidebar.ux-mobile-open {
+        left: 0;
+      }
+
+      /* Mobile backdrop */
+      .ux-mobile-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 100004;
+        display: none;
+        animation: ux-fade-in 200ms ease;
+      }
+      .ux-mobile-backdrop.active {
+        display: block;
+      }
+
+      /* Hamburger menu button */
+      .ux-hamburger {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 100006;
+        width: 44px;
+        height: 44px;
+        background: #232F3E;
+        border: 1px solid #3a4a5a;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        cursor: pointer;
+        transition: all 200ms;
+      }
+      .ux-hamburger:hover {
+        border-color: #FF6100;
+      }
+      .ux-hamburger span {
+        width: 20px;
+        height: 2px;
+        background: #F5F3EF;
+        border-radius: 2px;
+        transition: all 200ms;
+      }
+      .ux-hamburger.active span:nth-child(1) {
+        transform: translateY(6px) rotate(45deg);
+      }
+      .ux-hamburger.active span:nth-child(2) {
+        opacity: 0;
+      }
+      .ux-hamburger.active span:nth-child(3) {
+        transform: translateY(-6px) rotate(-45deg);
+      }
+
+      /* 2. Touch-friendly targets */
+      button, .btn, a.btn, [role="button"] {
+        min-height: 44px !important;
+        padding: 12px 16px !important;
+      }
+
+      .memory-card, .result-card, [data-memory-id] {
+        padding: 20px !important;
+        margin-bottom: 16px !important;
+      }
+
+      /* Search input full-width with larger font */
+      #global-search, input[type="search"], input.search-input {
+        width: 100% !important;
+        font-size: 16px !important; /* Prevents iOS zoom */
+        padding: 12px 16px !important;
+      }
+
+      /* Nav items stacked with more spacing */
+      .nav-item, nav a, .sidebar a {
+        display: block !important;
+        padding: 14px 16px !important;
+        margin: 4px 0 !important;
+      }
+
+      /* 3. Mobile search overlay */
+      .ux-mobile-search-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100007;
+        background: #1a2332;
+        display: none;
+        flex-direction: column;
+        animation: ux-fade-in 200ms ease;
+      }
+      .ux-mobile-search-overlay.active {
+        display: flex;
+      }
+      .ux-mobile-search-header {
+        display: flex;
+        align-items: center;
+        padding: 12px;
+        background: #232F3E;
+        border-bottom: 1px solid #3a4a5a;
+        gap: 12px;
+      }
+      .ux-mobile-search-back {
+        min-width: 44px;
+        height: 44px;
+        background: transparent;
+        border: none;
+        color: #F5F3EF;
+        font-size: 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .ux-mobile-search-input {
+        flex: 1;
+        background: #1a2332;
+        border: 1px solid #3a4a5a;
+        border-radius: 8px;
+        padding: 12px 16px;
+        color: #F5F3EF;
+        font-size: 16px;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      .ux-mobile-search-results {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+      }
+
+      /* 4. Bottom action bar */
+      .ux-mobile-action-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 64px;
+        background: #232F3E;
+        border-top: 1px solid #3a4a5a;
+        display: flex;
+        justify-content: space-around;
+        align-items: center;
+        z-index: 100003;
+        box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+      }
+      .ux-mobile-action-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-width: 64px;
+        height: 100%;
+        background: transparent;
+        border: none;
+        color: #8a9aaa;
+        font-size: 20px;
+        cursor: pointer;
+        transition: color 200ms;
+        font-family: Inter, system-ui, sans-serif;
+      }
+      .ux-mobile-action-btn:hover, .ux-mobile-action-btn.active {
+        color: #FF6100;
+      }
+      .ux-mobile-action-label {
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      /* Adjust main content to account for action bar */
+      .main, main, #app, .content {
+        padding-bottom: 80px !important;
+      }
+
+      /* Hide help button on mobile (use bottom bar instead) */
+      .ux-help-btn {
+        display: none;
+      }
+
+      /* Adjust user chip position for hamburger */
+      .ux-user-chip {
+        top: 12px;
+        right: 12px;
+        left: auto;
+      }
+
+      /* Modals full-width on mobile */
+      .ux-modal {
+        min-width: 90vw;
+        max-width: 90vw;
+        margin: 20px;
+      }
+
+      /* Help panel full-width */
+      .ux-help-panel {
+        width: 100vw;
+        right: -100vw;
+      }
+      .ux-help-panel.open {
+        right: 0;
+      }
+
+      /* Shortcut panel responsive */
+      .ux-shortcut-panel {
+        width: 90vw;
+        max-width: 90vw;
+      }
+
+      /* Toast positioning */
+      .ux-undo-toast, .ux-error-toast {
+        bottom: 80px;
+        right: 12px;
+        left: 12px;
+        max-width: calc(100vw - 24px);
+      }
+
+      /* Tag dropdown full-width */
+      .ux-tag-dropdown {
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+      }
+
+      /* Cards grid to single column */
+      .memory-grid, .results-grid, [class*="grid"] {
+        grid-template-columns: 1fr !important;
+      }
+    }
   \`;
   document.head.appendChild(style);
 
@@ -985,6 +1227,267 @@ const UX_ENHANCE_JS = `(function() {
     observer.observe(targetNode, { childList: true, subtree: true });
   }
 
+  // ─── 12. Mobile Responsive Enhancements ───────────────────────────────────
+
+  var isMobile = window.innerWidth <= 768;
+
+  // 12a. Hamburger menu + sidebar overlay
+  function setupMobileSidebar() {
+    if (!isMobile) return;
+
+    // Create hamburger button
+    var hamburger = document.createElement('button');
+    hamburger.className = 'ux-hamburger';
+    hamburger.innerHTML = '<span></span><span></span><span></span>';
+    hamburger.setAttribute('aria-label', 'Menu');
+    document.body.appendChild(hamburger);
+
+    // Create backdrop
+    var backdrop = document.createElement('div');
+    backdrop.className = 'ux-mobile-backdrop';
+    document.body.appendChild(backdrop);
+
+    // Find sidebar
+    var sidebar = document.querySelector('.sidebar, nav.sidebar, aside.sidebar, [class*="sidebar"]');
+    if (!sidebar) return;
+
+    function openSidebar() {
+      sidebar.classList.add('ux-mobile-open');
+      backdrop.classList.add('active');
+      hamburger.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeSidebar() {
+      sidebar.classList.remove('ux-mobile-open');
+      backdrop.classList.remove('active');
+      hamburger.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    hamburger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (sidebar.classList.contains('ux-mobile-open')) {
+        closeSidebar();
+      } else {
+        openSidebar();
+      }
+    });
+
+    backdrop.addEventListener('click', closeSidebar);
+
+    // Close sidebar when nav item clicked
+    sidebar.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A' || e.target.closest('a')) {
+        setTimeout(closeSidebar, 150);
+      }
+    });
+
+    // 12b. Swipe gestures
+    var touchStartX = 0;
+    var touchStartY = 0;
+    var touchEndX = 0;
+    var touchEndY = 0;
+
+    document.addEventListener('touchstart', function(e) {
+      touchStartX = e.changedTouches[0].screenX;
+      touchStartY = e.changedTouches[0].screenY;
+    }, { passive: true });
+
+    document.addEventListener('touchend', function(e) {
+      touchEndX = e.changedTouches[0].screenX;
+      touchEndY = e.changedTouches[0].screenY;
+      handleSwipe();
+    }, { passive: true });
+
+    function handleSwipe() {
+      var diffX = touchEndX - touchStartX;
+      var diffY = touchEndY - touchStartY;
+      var absDiffX = Math.abs(diffX);
+      var absDiffY = Math.abs(diffY);
+
+      // Only horizontal swipes with sufficient distance
+      if (absDiffX < 80 || absDiffY > 50) return;
+
+      // Swipe right from left edge (< 50px) → open sidebar
+      if (diffX > 0 && touchStartX < 50 && !sidebar.classList.contains('ux-mobile-open')) {
+        openSidebar();
+      }
+      // Swipe left → close sidebar
+      else if (diffX < 0 && sidebar.classList.contains('ux-mobile-open')) {
+        closeSidebar();
+      }
+    }
+  }
+
+  // 12c. Mobile search overlay
+  function setupMobileSearch() {
+    if (!isMobile) return;
+
+    var searchOverlay = document.createElement('div');
+    searchOverlay.className = 'ux-mobile-search-overlay';
+    searchOverlay.id = 'ux-mobile-search-overlay';
+    searchOverlay.innerHTML = '<div class="ux-mobile-search-header">'
+      + '<button class="ux-mobile-search-back" aria-label="Back">&#x2190;</button>'
+      + '<input type="search" class="ux-mobile-search-input" placeholder="Search memories..." />'
+      + '</div>'
+      + '<div class="ux-mobile-search-results" id="ux-mobile-search-results"></div>';
+    document.body.appendChild(searchOverlay);
+
+    var backBtn = searchOverlay.querySelector('.ux-mobile-search-back');
+    var searchInput = searchOverlay.querySelector('.ux-mobile-search-input');
+    var resultsContainer = searchOverlay.querySelector('.ux-mobile-search-results');
+
+    function openMobileSearch() {
+      searchOverlay.classList.add('active');
+      searchInput.focus();
+    }
+
+    function closeMobileSearch() {
+      searchOverlay.classList.remove('active');
+      searchInput.value = '';
+      resultsContainer.innerHTML = '';
+    }
+
+    backBtn.addEventListener('click', closeMobileSearch);
+
+    // Hook into the global search input if it exists
+    var globalSearch = document.getElementById('global-search');
+    if (globalSearch) {
+      globalSearch.addEventListener('focus', function() {
+        if (isMobile) {
+          openMobileSearch();
+          globalSearch.blur();
+        }
+      });
+    }
+
+    // Mirror search results to mobile overlay
+    searchInput.addEventListener('input', function() {
+      var query = searchInput.value.trim();
+      if (!query) {
+        resultsContainer.innerHTML = '';
+        return;
+      }
+
+      // If there's a search function on the page, call it
+      if (typeof window.searchMemories === 'function') {
+        window.searchMemories(query).then(function(results) {
+          renderMobileResults(results);
+        }).catch(function() {
+          resultsContainer.innerHTML = '<div style="padding:20px;color:#8a9aaa;text-align:center">Search error</div>';
+        });
+      } else {
+        // Fallback: show loading
+        resultsContainer.innerHTML = '<div style="padding:20px;color:#8a9aaa;text-align:center">Searching...</div>';
+      }
+    });
+
+    function renderMobileResults(results) {
+      if (!results || !results.length) {
+        resultsContainer.innerHTML = '<div style="padding:20px;color:#8a9aaa;text-align:center">No results found</div>';
+        return;
+      }
+
+      resultsContainer.innerHTML = results.map(function(r) {
+        return '<div class="memory-card" style="padding:16px;margin-bottom:12px;background:#232F3E;border:1px solid #3a4a5a;border-radius:8px">'
+          + '<h4 style="color:#F5F3EF;font-size:14px;margin-bottom:8px">' + escapeHtml(r.title || r.content?.substring(0, 50) || 'Untitled') + '</h4>'
+          + '<p style="color:#8a9aaa;font-size:12px">' + escapeHtml((r.content || '').substring(0, 100)) + '...</p>'
+          + '</div>';
+      }).join('');
+    }
+  }
+
+  // 12d. Bottom action bar
+  function setupMobileActionBar() {
+    if (!isMobile) return;
+
+    var actionBar = document.createElement('div');
+    actionBar.className = 'ux-mobile-action-bar';
+    actionBar.innerHTML = '<button class="ux-mobile-action-btn" data-action="search">'
+      + '<span>&#128269;</span><span class="ux-mobile-action-label">Search</span>'
+      + '</button>'
+      + '<button class="ux-mobile-action-btn" data-action="store">'
+      + '<span>&#10133;</span><span class="ux-mobile-action-label">Store</span>'
+      + '</button>'
+      + '<button class="ux-mobile-action-btn" data-action="checkin">'
+      + '<span>&#128197;</span><span class="ux-mobile-action-label">Checkin</span>'
+      + '</button>';
+    document.body.appendChild(actionBar);
+
+    actionBar.addEventListener('click', function(e) {
+      var btn = e.target.closest('.ux-mobile-action-btn');
+      if (!btn) return;
+
+      var action = btn.getAttribute('data-action');
+
+      // Remove active state from all buttons
+      actionBar.querySelectorAll('.ux-mobile-action-btn').forEach(function(b) {
+        b.classList.remove('active');
+      });
+      btn.classList.add('active');
+
+      // Navigate based on action
+      if (action === 'search') {
+        var searchOverlay = document.getElementById('ux-mobile-search-overlay');
+        if (searchOverlay) {
+          searchOverlay.classList.add('active');
+          searchOverlay.querySelector('.ux-mobile-search-input').focus();
+        }
+      } else if (action === 'store') {
+        location.hash = '#store';
+      } else if (action === 'checkin') {
+        location.hash = '#checkin';
+      }
+    });
+
+    // Sync active state with current page
+    function syncActionBar() {
+      var hash = location.hash.replace('#', '') || 'dashboard';
+      actionBar.querySelectorAll('.ux-mobile-action-btn').forEach(function(btn) {
+        var action = btn.getAttribute('data-action');
+        btn.classList.toggle('active', action === hash);
+      });
+    }
+
+    window.addEventListener('hashchange', syncActionBar);
+    syncActionBar();
+  }
+
+  // Update isMobile on resize
+  window.addEventListener('resize', function() {
+    var wasMobile = isMobile;
+    isMobile = window.innerWidth <= 768;
+
+    // Reinitialize mobile features if crossing threshold
+    if (isMobile !== wasMobile) {
+      // Clean up old elements
+      var hamburger = document.querySelector('.ux-hamburger');
+      var backdrop = document.querySelector('.ux-mobile-backdrop');
+      var searchOverlay = document.getElementById('ux-mobile-search-overlay');
+      var actionBar = document.querySelector('.ux-mobile-action-bar');
+
+      if (hamburger) hamburger.remove();
+      if (backdrop) backdrop.remove();
+      if (searchOverlay) searchOverlay.remove();
+      if (actionBar) actionBar.remove();
+
+      // Reset sidebar state
+      var sidebar = document.querySelector('.sidebar, nav.sidebar, aside.sidebar, [class*="sidebar"]');
+      if (sidebar) {
+        sidebar.classList.remove('ux-mobile-open');
+      }
+      document.body.style.overflow = '';
+
+      // Reinitialize if now mobile
+      if (isMobile) {
+        setupMobileSidebar();
+        setupMobileSearch();
+        setupMobileActionBar();
+      }
+    }
+  });
+
   // ─── Initialize all enhancements after DOM ready ──────────────────────────
   function init() {
     setupValidation();
@@ -996,6 +1499,14 @@ const UX_ENHANCE_JS = `(function() {
     setupPermissionGuards();
     applyOwnershipUI();
     setupOwnershipObserver();
+
+    // Mobile enhancements
+    isMobile = window.innerWidth <= 768;
+    if (isMobile) {
+      setupMobileSidebar();
+      setupMobileSearch();
+      setupMobileActionBar();
+    }
   }
 
   if (document.readyState === 'loading') {

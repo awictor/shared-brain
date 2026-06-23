@@ -22,6 +22,11 @@ import { TeamManager, registerTeamRoutes } from './teams.js';
 import { registerTeamsDemo } from './teams-demo.js';
 import { registerBrowse } from './browse.js';
 import { registerTeamAnalytics } from './analytics-team.js';
+import { JWTAuth } from './jwt-auth.js';
+import { VersionManager } from './versioning.js';
+import { registerVersioningDemo } from './versioning-demo.js';
+import { registerBackupDemo } from './backup-demo.js';
+import { BackupManager } from './backup.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -89,6 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_operations_synced ON operations(synced);
 
 class SqlJsStore implements Store {
   public db: any = null;
+  public versionManager: VersionManager | null = null;
   private dbPath: string;
 
   constructor(dbPath: string) {
@@ -110,6 +116,11 @@ class SqlJsStore implements Store {
     }
 
     this.db.run(SCHEMA);
+
+    // Initialize versioning system
+    this.versionManager = new VersionManager(this.db);
+    this.versionManager.initialize();
+
     this.save();
   }
 
@@ -470,6 +481,10 @@ await vectorIndex.loadFromStore();
 registerHealthChecks(app, { store, embeddings, vectorIndex });
 console.log(`[health] Health checks → /health/ready, /health/deep, /health/metrics`);
 
+// Wire up JWT authentication layer
+const jwtAuth = new JWTAuth(store.db);
+jwtAuth.initialize();
+
 // Wire up security layer (zero-config)
 const security = new SecurityLayer(store.db);
 const { token: securityToken } = security.initialize();
@@ -478,10 +493,13 @@ const { token: securityToken } = security.initialize();
 app.use(security.securityHeadersMiddleware());
 app.use(security.auditMiddleware());
 
-// User identification from request headers (injected by proxy)
+// JWT authentication middleware for /mcp (validates token, extracts userId/userName)
+app.use('/mcp', jwtAuth.middleware());
+
+// User identification from JWT payload (attached by jwtAuth middleware)
 app.use('/mcp', (req, _res, next) => {
-  const userId = req.headers['x-user-id'] as string ?? 'anonymous';
-  const userName = req.headers['x-user-name'] as string ?? userId;
+  const userId = (req as any).userId ?? 'anonymous';
+  const userName = (req as any).userName ?? userId;
   // Set on the handler so MCP tools use the right identity
   handler.setCurrentUser(userId, userName);
   next();
@@ -569,6 +587,55 @@ console.log(`[analytics] Team analytics → http://${host}:${port}/analytics/tea
 registerBrowse(app);
 console.log(`[browse] Browse knowledge page → http://${host}:${port}/browse`);
 
+// Wire up version history UI
+if (store.versionManager) {
+  registerVersioningDemo(app, store.versionManager, store);
+  console.log(`[versioning] Version history → http://${host}:${port}/demo/versions`);
+}
+// Wire up backup manager
+const backupManager = new BackupManager(dbPath);
+await backupManager.initialize();
+registerBackupDemo(app, backupManager);
+console.log(`[backup] Backup manager ready → http://${host}:${port}/demo/backup`);
+
+
+// JWT token issuance endpoint
+app.get('/api/auth/token', (req, res) => {
+  const userId = req.query['userId'] as string;
+  const userName = req.query['userName'] as string;
+
+  if (!userId || !userName) {
+    res.status(400).json({ error: 'Missing userId or userName query parameter' });
+    return;
+  }
+
+  try {
+    const token = jwtAuth.issueToken(userId, userName);
+    res.json({ token, expiresIn: '30d' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message ?? 'Failed to issue token' });
+  }
+});
+
+// JWT token verification endpoint (for /join page to validate tokens)
+app.get('/api/auth/verify', (req, res) => {
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(400).json({ error: 'Missing or invalid Authorization header' });
+    return;
+  }
+
+  const token = authHeader.slice(7);
+  const payload = jwtAuth.verifyToken(token);
+
+  if (payload) {
+    res.json({ valid: true, userId: payload.userId, userName: payload.userName });
+  } else {
+    res.status(401).json({ valid: false, error: 'Invalid or expired token' });
+  }
+});
+
 // Serve the proxy script for teammates to download
 app.get('/proxy.js', (_req, res) => {
   const serverUrl = process.env['PUBLIC_URL'] ?? `http://${host}:${port}`;
@@ -577,9 +644,15 @@ app.get('/proxy.js', (_req, res) => {
  * SharedBrain MCP Proxy — connects your AI agent to the team brain.
  * Points to: ${serverUrl}/mcp
  *
- * On first run, prompts for your user alias and saves to ~/.shared-brain/identity.json
+ * On first run:
+ * 1. Prompts for your user alias/name
+ * 2. Requests a JWT token from the server
+ * 3. Saves identity + token to ~/.shared-brain/identity.json
+ *
+ * Includes JWT token in all MCP requests via Authorization: Bearer header.
  */
 const MCP_URL = '${serverUrl}/mcp';
+const TOKEN_URL = '${serverUrl}/api/auth/token';
 const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
@@ -590,20 +663,38 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'identity.json');
 async function getIdentity() {
   if (fs.existsSync(CONFIG_FILE)) {
     try {
-      return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+      // Validate token is present (old configs won't have it)
+      if (config.token) return config;
+      process.stderr.write('[proxy] Existing config missing JWT token — re-authenticating...\\n');
     } catch {}
   }
-  // First run — prompt for identity
+
+  // First run or missing token — prompt for identity and fetch JWT
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   const ask = (q) => new Promise(resolve => rl.question(q, resolve));
   process.stderr.write('\\n=== SharedBrain First-Run Setup ===\\n');
   const userId = await ask('Your alias (e.g. jsmith): ');
   const userName = await ask('Display name (e.g. Jane Smith): ');
   rl.close();
-  const identity = { userId: userId.trim(), userName: userName.trim() };
+
+  const trimmedUserId = userId.trim();
+  const trimmedUserName = userName.trim();
+
+  // Request JWT token from server
+  process.stderr.write('[proxy] Requesting JWT token from server...\\n');
+  const tokenResp = await fetch(\`\${TOKEN_URL}?userId=\${encodeURIComponent(trimmedUserId)}&userName=\${encodeURIComponent(trimmedUserName)}\`);
+  if (!tokenResp.ok) {
+    const err = await tokenResp.text();
+    throw new Error(\`Failed to obtain JWT token: \${err}\`);
+  }
+  const tokenData = await tokenResp.json();
+  const token = tokenData.token;
+
+  const identity = { userId: trimmedUserId, userName: trimmedUserName, token };
   if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(identity, null, 2));
-  process.stderr.write('Identity saved to ' + CONFIG_FILE + '\\n\\n');
+  process.stderr.write('[proxy] Identity + JWT token saved to ' + CONFIG_FILE + '\\n\\n');
   return identity;
 }
 
@@ -628,11 +719,18 @@ async function handleMessage(line, identity) {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/event-stream',
-        'X-User-Id': identity.userId,
-        'X-User-Name': identity.userName,
+        'Authorization': \`Bearer \${identity.token}\`,
       },
       body: line,
     });
+
+    if (resp.status === 401) {
+      // Token expired or invalid — trigger re-auth on next run
+      process.stderr.write('[proxy] JWT token expired — please re-run to re-authenticate\\n');
+      fs.unlinkSync(CONFIG_FILE);
+      process.exit(1);
+    }
+
     const text = await resp.text();
     const dataLines = text.split('\\n').filter(l => l.startsWith('data: '));
     for (const dl of dataLines) process.stdout.write(dl.slice(6) + '\\n');
@@ -641,7 +739,7 @@ async function handleMessage(line, identity) {
     try {
       const p = JSON.parse(line);
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: String(err.message || err) }, id: p.id ?? null }) + '\\n');
-    } catch { process.stderr.write('Proxy error: ' + err + '\\n'); }
+    } catch { process.stderr.write('[proxy] Error: ' + err + '\\n'); }
   }
 }
 

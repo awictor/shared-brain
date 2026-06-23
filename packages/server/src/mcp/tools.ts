@@ -347,4 +347,49 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
       };
     },
   );
+
+  // ─── memory_history ────────────────────────────────────────────────────────
+
+  server.tool(
+    'memory_history',
+    'Get the full version history for a memory, showing all edits and who made them.',
+    {
+      id: z.string().describe('Memory UUID.'),
+      limit: z.number().default(50).describe('Max number of versions to return.'),
+    },
+    async (params) => {
+      const versionManager = (store as any).versionManager;
+      if (!versionManager) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Version history not available.' }) }],
+          isError: true,
+        };
+      }
+
+      const history = versionManager.getHistory(params.id, params.limit);
+
+      if (!history || history.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'No version history found for this memory.' }) }],
+          isError: true,
+        };
+      }
+
+      // Format for display
+      const formatted = history.map((v: any) => ({
+        version: v.version,
+        changeType: v.changeType,
+        changedBy: v.changedBy,
+        changedAt: v.changedAt,
+        contentSnippet: v.content.slice(0, 100) + (v.content.length > 100 ? '...' : ''),
+        title: v.title,
+        type: v.type,
+        tags: JSON.parse(v.tagsJson || '[]'),
+      }));
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ history: formatted, count: history.length }) }],
+      };
+    },
+  );
 }

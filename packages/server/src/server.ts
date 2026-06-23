@@ -39,7 +39,9 @@ export async function createServer(
   await store.initialize();
   await embeddings.initialize();
 
-  const handler = new MemoryHandler(store, embeddings, vectorIndex);
+  // Pass versionManager if the store has one
+  const versionManager = (store as any).versionManager ?? null;
+  const handler = new MemoryHandler(store, embeddings, vectorIndex, versionManager);
 
   const app = express();
   app.use(helmet());

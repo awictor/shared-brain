@@ -1,0 +1,5 @@
+// Wire up backup manager
+const backupManager = new BackupManager(dbPath);
+await backupManager.initialize();
+registerBackupDemo(app, backupManager);
+console.log(`[backup] Backup manager ready → http://${host}:${port}/demo/backup`);
