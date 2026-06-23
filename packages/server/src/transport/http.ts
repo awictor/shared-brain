@@ -64,9 +64,9 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
     return server;
   };
 
-  // Landing page → redirect to dashboard
+  // Landing page → redirect to app
   app.get('/', (_req: Request, res: Response) => {
-    res.redirect('/ui');
+    res.redirect(302, '/app');
   });
 
   app.post('/mcp', async (req: Request, res: Response) => {
@@ -120,7 +120,13 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
     });
   });
 
+  // Old /ui endpoint → redirect to /app
   app.get('/ui', (_req: Request, res: Response) => {
+    res.redirect(302, '/app');
+  });
+
+  // Canonical dashboard at /app
+  app.get('/app', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(DASHBOARD_HTML);
   });

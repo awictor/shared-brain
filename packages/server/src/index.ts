@@ -18,6 +18,10 @@ import { registerApp } from './app.js';
 import { registerUXResearch } from './ux-research.js';
 import { registerUXEnhancements } from './ux-enhancements.js';
 import { registerHealthChecks } from './healthcheck.js';
+import { TeamManager, registerTeamRoutes } from './teams.js';
+import { registerTeamsDemo } from './teams-demo.js';
+import { registerBrowse } from './browse.js';
+import { registerTeamAnalytics } from './analytics-team.js';
 import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
@@ -502,6 +506,13 @@ identityManager.initialize();
 registerIdentityDemo(app, identityManager);
 console.log(`[identity] Cross-agent identity system ready → http://${host}:${port}/demo/identity`);
 
+// Wire up team management system
+const teamManager = new TeamManager(store.db);
+teamManager.initialize();
+registerTeamRoutes(app, teamManager);
+registerTeamsDemo(app, teamManager);
+console.log(`[teams] Team management ready → http://${host}:${port}/demo/teams`);
+
 // Wire up the auto-organizer + demo UI (organizer already created above for AutoEnhancer)
 registerOrganizerDemo(app, organizer);
 console.log(`[organizer] Auto-organization layer ready → http://${host}:${port}/demo/organizer`);
@@ -549,6 +560,14 @@ console.log(`[ux-enhance] UX enhancements script → /ux-enhance.js`);
 // Wire up team onboarding page
 registerTeamOnboarding(app);
 console.log(`[team] Team join page → http://${host}:${port}/join`);
+
+// Wire up team analytics dashboard
+registerTeamAnalytics(app);
+console.log(`[analytics] Team analytics → http://${host}:${port}/analytics/team`);
+
+// Wire up browse knowledge page
+registerBrowse(app);
+console.log(`[browse] Browse knowledge page → http://${host}:${port}/browse`);
 
 // Serve the proxy script for teammates to download
 app.get('/proxy.js', (_req, res) => {
