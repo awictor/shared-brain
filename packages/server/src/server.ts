@@ -10,7 +10,7 @@ import { registerTools } from './mcp/tools.js';
 import { registerResources } from './mcp/resources.js';
 import { authMiddleware } from './auth/middleware.js';
 import { MemoryHandler } from './mcp/handler.js';
-import type { Store, Embeddings, VectorIndex } from './mcp/handler.js';
+import type { Store, Embeddings, VectorIndex, FullTextIndex } from './mcp/handler.js';
 
 export interface ServerConfig {
   port: number;
@@ -20,6 +20,7 @@ export interface ServerConfig {
   modelsPath?: string;
   toolDeps?: Record<string, unknown>;
   allowedOrigins?: string[];
+  skipInit?: boolean;
 }
 
 export interface ServerInstance {
@@ -32,16 +33,18 @@ export interface ServerInstance {
 
 export async function createServer(
   config: ServerConfig,
-  deps: { store: Store; embeddings: Embeddings; vectorIndex: VectorIndex },
+  deps: { store: Store; embeddings: Embeddings; vectorIndex: VectorIndex; fullTextIndex?: FullTextIndex; notificationManager?: any },
 ): Promise<ServerInstance> {
-  const { store, embeddings, vectorIndex } = deps;
+  const { store, embeddings, vectorIndex, fullTextIndex, notificationManager } = deps;
 
-  await store.initialize();
-  await embeddings.initialize();
+  if (!(config as any).skipInit) {
+    await store.initialize();
+    await embeddings.initialize();
+  }
 
   // Pass versionManager if the store has one
   const versionManager = (store as any).versionManager ?? null;
-  const handler = new MemoryHandler(store, embeddings, vectorIndex, versionManager);
+  const handler = new MemoryHandler(store, embeddings, vectorIndex, fullTextIndex, versionManager, notificationManager);
 
   const app = express();
   app.use(helmet());

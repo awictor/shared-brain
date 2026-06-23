@@ -22,6 +22,27 @@ export function registerSecurityDemo(app: Application, security: SecurityLayer):
     res.json(security.getRateLimitStatus());
   });
 
+  // Security audit endpoint (localhost-only for safety)
+  app.get('/api/security/audit', (req, res) => {
+    const clientIp = req.ip || req.socket.remoteAddress || '';
+    const isLocalhost =
+      clientIp === '127.0.0.1' ||
+      clientIp === '::1' ||
+      clientIp === '::ffff:127.0.0.1' ||
+      req.hostname === 'localhost';
+
+    if (!isLocalhost) {
+      res.status(403).json({
+        error: 'Forbidden: Security audit endpoint restricted to localhost',
+        hint: 'Access this endpoint from the server host only',
+      });
+      return;
+    }
+
+    const audit = security.securityAudit();
+    res.json(audit);
+  });
+
   app.post('/api/security/test-sanitize', (req, res) => {
     const { content, title, tags } = req.body || {};
     // Import sanitization without actually blocking

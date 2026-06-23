@@ -533,6 +533,220 @@ export class SecurityLayer {
     };
   }
 
+  /**
+   * Comprehensive security audit — returns current security posture as JSON.
+   * Checks: CORS config, JWT settings, rate limits, data encryption, endpoint exposure.
+   */
+  securityAudit(): {
+    timestamp: string;
+    overallRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    findings: Array<{
+      category: string;
+      severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      status: 'PASS' | 'WARN' | 'FAIL';
+      message: string;
+      recommendation?: string;
+    }>;
+    summary: {
+      critical: number;
+      high: number;
+      medium: number;
+      low: number;
+      passed: number;
+    };
+  } {
+    const findings: Array<{
+      category: string;
+      severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+      status: 'PASS' | 'WARN' | 'FAIL';
+      message: string;
+      recommendation?: string;
+    }> = [];
+
+    // Check 1: CORS Configuration
+    const nodeEnv = process.env['NODE_ENV'] ?? 'development';
+    const allowedOrigins = process.env['ALLOWED_ORIGINS'];
+    const isProduction = nodeEnv === 'production';
+
+    if (isProduction && !allowedOrigins) {
+      findings.push({
+        category: 'CORS',
+        severity: 'CRITICAL',
+        status: 'FAIL',
+        message: 'Production deployment with ALLOWED_ORIGINS=undefined allows any origin',
+        recommendation: 'Set ALLOWED_ORIGINS env var to comma-separated whitelist',
+      });
+    } else if (!isProduction && !allowedOrigins) {
+      findings.push({
+        category: 'CORS',
+        severity: 'LOW',
+        status: 'WARN',
+        message: 'Development mode allows all origins (expected behavior)',
+        recommendation: 'Ensure ALLOWED_ORIGINS is set before production deployment',
+      });
+    } else {
+      findings.push({
+        category: 'CORS',
+        severity: 'LOW',
+        status: 'PASS',
+        message: `CORS restricted to: ${allowedOrigins}`,
+      });
+    }
+
+    // Check 2: JWT Secret Storage
+    let jwtSecretExists = false;
+    try {
+      const rows = this.db.exec("SELECT value FROM sync_state WHERE key = 'jwt_secret'");
+      jwtSecretExists = rows.length > 0 && rows[0].values.length > 0;
+    } catch { /* table may not exist */ }
+
+    if (jwtSecretExists) {
+      const masterKey = process.env['MASTER_KEY'];
+      if (!masterKey) {
+        findings.push({
+          category: 'Authentication',
+          severity: 'CRITICAL',
+          status: 'FAIL',
+          message: 'JWT secret stored in plaintext (no MASTER_KEY for encryption)',
+          recommendation: 'Set MASTER_KEY env var (32 bytes hex) and encrypt secrets',
+        });
+      } else {
+        findings.push({
+          category: 'Authentication',
+          severity: 'LOW',
+          status: 'PASS',
+          message: 'JWT secret encryption key configured',
+        });
+      }
+    }
+
+    // Check 3: Rate Limiting
+    if (!this.config.rateLimiting) {
+      findings.push({
+        category: 'Rate Limiting',
+        severity: 'HIGH',
+        status: 'FAIL',
+        message: 'Rate limiting disabled (rateLimiting: false)',
+        recommendation: 'Enable rate limiting to prevent abuse',
+      });
+    } else {
+      const activeWindows = this.rateLimiter.getStatus().length;
+      findings.push({
+        category: 'Rate Limiting',
+        severity: 'LOW',
+        status: 'PASS',
+        message: `Rate limiting active (${activeWindows} windows tracked)`,
+      });
+    }
+
+    // Check 4: Audit Logging
+    if (!this.config.auditLog) {
+      findings.push({
+        category: 'Audit Logging',
+        severity: 'MEDIUM',
+        status: 'WARN',
+        message: 'Audit logging disabled (auditLog: false)',
+        recommendation: 'Enable audit logging for compliance and incident response',
+      });
+    } else {
+      let auditCount = 0;
+      try {
+        const rows = this.db.exec('SELECT COUNT(*) FROM audit_log');
+        auditCount = rows[0]?.values[0]?.[0] ?? 0;
+      } catch { /* table may not exist */ }
+      findings.push({
+        category: 'Audit Logging',
+        severity: 'LOW',
+        status: 'PASS',
+        message: `Audit logging enabled (${auditCount} entries)`,
+      });
+    }
+
+    // Check 5: Content Size Limits
+    if (this.config.maxContentLength > 1_000_000) {
+      findings.push({
+        category: 'Input Validation',
+        severity: 'MEDIUM',
+        status: 'WARN',
+        message: `Max content length unusually high (${this.config.maxContentLength} bytes)`,
+        recommendation: 'Reduce to 100KB or less to prevent resource exhaustion',
+      });
+    } else {
+      findings.push({
+        category: 'Input Validation',
+        severity: 'LOW',
+        status: 'PASS',
+        message: `Content size limits enforced (${this.config.maxContentLength} bytes)`,
+      });
+    }
+
+    // Check 6: Auto-Token Generation
+    if (this.config.autoToken && this.tokenStatus === 'auto-generated') {
+      findings.push({
+        category: 'Authentication',
+        severity: 'LOW',
+        status: 'PASS',
+        message: 'Auto-generated auth token active',
+      });
+    } else if (!this.config.autoToken) {
+      findings.push({
+        category: 'Authentication',
+        severity: 'MEDIUM',
+        status: 'WARN',
+        message: 'Auto-token generation disabled (manual token management required)',
+      });
+    }
+
+    // Check 7: Database Encryption
+    // Note: Cannot directly detect SQLCipher from sql.js — check via env var hint
+    const dbEncryptionKey = process.env['DB_ENCRYPTION_KEY'];
+    if (isProduction && !dbEncryptionKey) {
+      findings.push({
+        category: 'Data at Rest',
+        severity: 'HIGH',
+        status: 'FAIL',
+        message: 'Production database not encrypted (DB_ENCRYPTION_KEY not set)',
+        recommendation: 'Use SQLCipher or encrypt data directory',
+      });
+    } else if (dbEncryptionKey) {
+      findings.push({
+        category: 'Data at Rest',
+        severity: 'LOW',
+        status: 'PASS',
+        message: 'Database encryption key configured',
+      });
+    } else {
+      findings.push({
+        category: 'Data at Rest',
+        severity: 'LOW',
+        status: 'WARN',
+        message: 'Database encryption not detected (acceptable in dev)',
+      });
+    }
+
+    // Compute summary
+    const summary = {
+      critical: findings.filter(f => f.severity === 'CRITICAL').length,
+      high: findings.filter(f => f.severity === 'HIGH').length,
+      medium: findings.filter(f => f.severity === 'MEDIUM').length,
+      low: findings.filter(f => f.severity === 'LOW').length,
+      passed: findings.filter(f => f.status === 'PASS').length,
+    };
+
+    // Overall risk level
+    let overallRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
+    if (summary.critical > 0) overallRisk = 'CRITICAL';
+    else if (summary.high > 0) overallRisk = 'HIGH';
+    else if (summary.medium > 0) overallRisk = 'MEDIUM';
+
+    return {
+      timestamp: new Date().toISOString(),
+      overallRisk,
+      findings,
+      summary,
+    };
+  }
+
   // ─── Cleanup ───────────────────────────────────────────────────────────
 
   /**

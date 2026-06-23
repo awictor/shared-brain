@@ -53,7 +53,7 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
 
   server.tool(
     'memory_search',
-    'Semantic search across memories. Returns the most relevant memories by meaning, not just keyword match.',
+    'Hybrid semantic + keyword search across memories. Returns the most relevant memories using both meaning (embeddings) and exact keyword match (BM25). Use mode parameter to control: "hybrid" (default, best of both), "semantic" (embedding-only), or "keyword" (BM25-only for exact terms).',
     {
       query: z.string().describe('Natural language search query.'),
       scope: z.object({
@@ -69,7 +69,8 @@ export function registerTools(server: McpServer, deps: ToolDependencies): void {
         before: z.string().optional().describe('ISO date — only memories before this date.'),
       }).optional(),
       limit: z.number().default(10).describe('Max results to return.'),
-      threshold: z.number().default(0.3).describe('Minimum similarity score (0-1).'),
+      threshold: z.number().default(0.3).describe('Minimum similarity score (0-1) for semantic search.'),
+      mode: z.enum(['semantic', 'keyword', 'hybrid']).default('hybrid').describe('Search mode: "semantic" (embedding-only), "keyword" (BM25 exact-match), or "hybrid" (both with RRF fusion).'),
     },
     async (params) => {
       const results = await handler.handleSearch(params);

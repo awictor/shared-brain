@@ -95,6 +95,16 @@ export interface VectorIndex {
   size(): number;
 }
 
+/**
+ * Minimal interface for the full-text index.
+ */
+export interface FullTextIndex {
+  add(id: string, content: string, title?: string, tags?: string[]): void;
+  remove(id: string): void;
+  search(query: string, limit?: number): Array<{ id: string; score: number }>;
+  size(): number;
+}
+
 export interface ScopeFilter {
   personal?: boolean;
   teamIds?: string[];
@@ -134,6 +144,7 @@ export interface SearchParams {
   filters?: SearchFilters;
   limit?: number;
   threshold?: number;
+  mode?: 'semantic' | 'keyword' | 'hybrid';
 }
 
 export interface UpdateParams {
@@ -174,7 +185,9 @@ export class MemoryHandler {
     private readonly store: Store,
     private readonly embeddings: Embeddings,
     private readonly vectorIndex: VectorIndex,
+    private readonly fullTextIndex?: FullTextIndex,
     private readonly versionManager?: any, // VersionManager (any to avoid circular import)
+    private readonly notificationManager?: any, // NotificationManager (any to avoid circular import)
     currentUserId?: string,
     currentUserName?: string,
   ) {
@@ -234,6 +247,11 @@ export class MemoryHandler {
     await this.store.createMemory(memory);
     this.vectorIndex.add(id, embedding);
 
+    // Add to full-text index
+    if (this.fullTextIndex) {
+      this.fullTextIndex.add(id, params.content, params.title, params.tags);
+    }
+
     // Record version
     if (this.versionManager) {
       this.versionManager.recordVersion(memory, this._currentUserId, 'created');
@@ -253,25 +271,108 @@ export class MemoryHandler {
     };
     await this.store.createOperation(op);
 
+    // Trigger notifications
+    if (this.notificationManager) {
+      // Check for related memories
+      await this.notificationManager.checkRelatedMemory(
+        id,
+        params.content,
+        this._currentUserId,
+        this._currentUserName,
+        embedding,
+      );
+
+      // Check if memory references another user's memory
+      if (params.relations && params.relations.length > 0) {
+        await this.notificationManager.checkMemoryReferenced(
+          id,
+          this._currentUserId,
+          this._currentUserName,
+          params.relations,
+        );
+      }
+
+      // Check for team decisions
+      await this.notificationManager.checkTeamDecision(
+        id,
+        this._currentUserId,
+        this._currentUserName,
+        params.type || 'fact',
+        params.content,
+      );
+
+      // Check for milestones
+      await this.notificationManager.checkMilestone();
+    }
+
     return { id, message: `Memory stored successfully.` };
   }
 
   /**
-   * Semantic search: embed query, search vector index, filter, return ranked results.
+   * Semantic + keyword hybrid search with Reciprocal Rank Fusion (RRF).
+   *
+   * Runs both semantic (vector) and keyword (BM25) search in parallel, then merges
+   * results using RRF: score = sum(1 / (k + rank)) where k=60.
    */
   async handleSearch(params: SearchParams): Promise<Array<{ memory: Omit<Memory, 'embedding'> & { isOwner: boolean }; score: number }>> {
     const limit = params.limit ?? 10;
     const threshold = params.threshold ?? 0.3;
+    const mode = params.mode ?? 'hybrid';
 
-    // Embed the query
-    const queryVector = await this.embeddings.embed(params.query);
+    // ─── Semantic search ───────────────────────────────────────────────────────
+    let semanticCandidates: Array<{ id: string; score: number }> = [];
+    if (mode === 'semantic' || mode === 'hybrid') {
+      const queryVector = await this.embeddings.embed(params.query);
+      semanticCandidates = this.vectorIndex.search(queryVector, limit * 3, threshold);
+    }
 
-    // Search vector index (fetch extra to account for filtering)
-    const candidates = this.vectorIndex.search(queryVector, limit * 3, threshold);
+    // ─── Keyword search ────────────────────────────────────────────────────────
+    let keywordCandidates: Array<{ id: string; score: number }> = [];
+    if ((mode === 'keyword' || mode === 'hybrid') && this.fullTextIndex) {
+      keywordCandidates = this.fullTextIndex.search(params.query, limit * 3);
+    }
 
+    // ─── Merge results with Reciprocal Rank Fusion ────────────────────────────
+    let mergedCandidates: Array<{ id: string; score: number }>;
+
+    if (mode === 'hybrid' && semanticCandidates.length > 0 && keywordCandidates.length > 0) {
+      // Build rank maps
+      const semanticRank = new Map<string, number>();
+      semanticCandidates.forEach((c, idx) => semanticRank.set(c.id, idx + 1));
+
+      const keywordRank = new Map<string, number>();
+      keywordCandidates.forEach((c, idx) => keywordRank.set(c.id, idx + 1));
+
+      // Compute RRF scores
+      const k = 60; // RRF constant
+      const rrfScores = new Map<string, number>();
+      const allIds = new Set([...semanticRank.keys(), ...keywordRank.keys()]);
+
+      for (const id of allIds) {
+        let rrfScore = 0;
+        if (semanticRank.has(id)) {
+          rrfScore += 1 / (k + semanticRank.get(id)!);
+        }
+        if (keywordRank.has(id)) {
+          rrfScore += 1 / (k + keywordRank.get(id)!);
+        }
+        rrfScores.set(id, rrfScore);
+      }
+
+      // Sort by RRF score descending
+      mergedCandidates = [...rrfScores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, score]) => ({ id, score }));
+    } else if (mode === 'keyword') {
+      mergedCandidates = keywordCandidates;
+    } else {
+      mergedCandidates = semanticCandidates;
+    }
+
+    // ─── Fetch memories + apply filters ────────────────────────────────────────
     const results: Array<{ memory: Omit<Memory, 'embedding'> & { isOwner: boolean }; score: number }> = [];
 
-    for (const candidate of candidates) {
+    for (const candidate of mergedCandidates) {
       if (results.length >= limit) break;
 
       const memory = await this.store.getMemory(candidate.id);
@@ -373,6 +474,15 @@ export class MemoryHandler {
 
     await this.store.updateMemory(params.id, updates);
 
+    // Update full-text index if content, title, or tags changed
+    if (this.fullTextIndex && (params.content || params.title !== undefined || params.tags)) {
+      const updated = await this.store.getMemory(params.id);
+      if (updated) {
+        this.fullTextIndex.remove(params.id);
+        this.fullTextIndex.add(params.id, updated.content, updated.title ?? undefined, updated.tags);
+      }
+    }
+
     // Record version (fetch updated memory)
     if (this.versionManager) {
       const updated = await this.store.getMemory(params.id);
@@ -418,6 +528,11 @@ export class MemoryHandler {
 
     await this.store.updateMemory(params.id, { deleted: true, updatedAt: now, hlc });
     this.vectorIndex.remove(params.id);
+
+    // Remove from full-text index
+    if (this.fullTextIndex) {
+      this.fullTextIndex.remove(params.id);
+    }
 
     // Record version
     if (this.versionManager) {

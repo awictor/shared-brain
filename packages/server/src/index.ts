@@ -22,12 +22,17 @@ import { TeamManager, registerTeamRoutes } from './teams.js';
 import { registerTeamsDemo } from './teams-demo.js';
 import { registerBrowse } from './browse.js';
 import { registerTeamAnalytics } from './analytics-team.js';
+import { registerGraph } from './graph.js';
 import { JWTAuth } from './jwt-auth.js';
 import { VersionManager } from './versioning.js';
 import { registerVersioningDemo } from './versioning-demo.js';
 import { registerBackupDemo } from './backup-demo.js';
 import { BackupManager } from './backup.js';
-import type { Store, Embeddings, VectorIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
+import { NotificationManager } from './notifications.js';
+import { registerNotificationsDemo } from './notifications-demo.js';
+import { FullTextIndex as FullTextIndexImpl } from './fulltext.js';
+import { registerMonitoring } from './monitoring.js';
+import type { Store, Embeddings, VectorIndex, FullTextIndex, ListOptions, ScopeFilter, Memory, MemoryOperation } from './mcp/handler.js';
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
@@ -419,6 +424,44 @@ class PersistentHNSWIndex implements VectorIndex {
   }
 }
 
+// ─── Full-Text Index (BM25, rebuilt from DB on startup) ──────────────────────
+
+class PersistentFullTextIndex implements FullTextIndex {
+  private index: FullTextIndexImpl;
+  private store: SqlJsStore;
+
+  constructor(store: SqlJsStore) {
+    this.store = store;
+    this.index = new FullTextIndexImpl();
+  }
+
+  async loadFromStore(): Promise<void> {
+    const memories = await this.store.listMemories({ limit: 100000, offset: 0 });
+    let loaded = 0;
+    for (const m of memories) {
+      this.index.add(m.id, m.content, m.title ?? undefined, m.tags);
+      loaded++;
+    }
+    if (loaded > 0) console.log(`[fulltext] BM25 index loaded ${loaded} memories from database.`);
+  }
+
+  add(id: string, content: string, title?: string, tags?: string[]): void {
+    this.index.add(id, content, title, tags);
+  }
+
+  remove(id: string): void {
+    this.index.remove(id);
+  }
+
+  search(query: string, limit?: number): Array<{ id: string; score: number }> {
+    return this.index.search(query, limit);
+  }
+
+  size(): number {
+    return this.index.size();
+  }
+}
+
 // ─── ONNX Embedding Engine ───────────────────────────────────────────────────
 
 class OnnxEmbeddingEngine implements Embeddings {
@@ -464,18 +507,37 @@ const dbPath = process.env['DB_PATH'] ?? 'C:/Users/awictor/shared-brain/data/bra
 const store = new SqlJsStore(dbPath);
 const embeddings = new OnnxEmbeddingEngine();
 const vectorIndex = new PersistentHNSWIndex(store);
+const fullTextIndex = new PersistentFullTextIndex(store);
 
 // Create organizer + auto-enhancer before server so MCP tools can use them
 const organizer = new Organizer(embeddings, vectorIndex, store);
 const autoEnhancer = new AutoEnhancer(organizer, store, embeddings, vectorIndex);
 
+// Initialize store first (so store.db is available for other components)
+await store.initialize();
+await embeddings.initialize();
+
+// Create notification manager (needs store.db to be ready)
+const notificationManager = new NotificationManager(store.db, embeddings, vectorIndex);
+notificationManager.initialize();
+
 const { app, handler } = await createServer(
-  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined, toolDeps: { autoEnhancer }, allowedOrigins: ALLOWED_ORIGINS },
-  { store, embeddings, vectorIndex },
+  { port, host, dbPath, authToken: process.env['AUTH_TOKEN'] || undefined, toolDeps: { autoEnhancer }, allowedOrigins: ALLOWED_ORIGINS, skipInit: true },
+  { store, embeddings, vectorIndex, fullTextIndex, notificationManager },
 );
 
-// Load vectors from persisted embeddings into HNSW index
+// Load vectors and full-text index from persisted data
 await vectorIndex.loadFromStore();
+await fullTextIndex.loadFromStore();
+
+// Register monitoring dashboard (before security middleware to track all requests)
+const metricsCollector = registerMonitoring(app, dbPath);
+console.log(`[monitoring] Dashboard → http://${host}:${port}/monitoring`);
+console.log(`[monitoring] Metrics API → /api/metrics, /api/metrics/history, /api/metrics/alerts`);
+
+// Update monitoring metrics with current counts
+metricsCollector.updateMemoryCount(await store.countMemories());
+metricsCollector.updateVectorIndexSize(vectorIndex.size());
 
 // Register health check endpoints (before security middleware so ALB can reach /health/*)
 registerHealthChecks(app, { store, embeddings, vectorIndex });
@@ -587,6 +649,10 @@ console.log(`[analytics] Team analytics → http://${host}:${port}/analytics/tea
 registerBrowse(app);
 console.log(`[browse] Browse knowledge page → http://${host}:${port}/browse`);
 
+// Wire up knowledge graph visualization
+registerGraph(app);
+console.log(`[graph] Knowledge graph visualization → http://${host}:${port}/graph`);
+
 // Wire up version history UI
 if (store.versionManager) {
   registerVersioningDemo(app, store.versionManager, store);
@@ -597,6 +663,10 @@ const backupManager = new BackupManager(dbPath);
 await backupManager.initialize();
 registerBackupDemo(app, backupManager);
 console.log(`[backup] Backup manager ready → http://${host}:${port}/demo/backup`);
+
+// Wire up notifications demo
+registerNotificationsDemo(app, notificationManager);
+console.log(`[notifications] Notifications demo → http://${host}:${port}/demo/notifications`);
 
 
 // JWT token issuance endpoint
