@@ -742,7 +742,7 @@ async function performSearch(query) {
     return;
   }
   document.getElementById('search-results').innerHTML = '<div style="text-align:center;padding:40px"><div class="loading-spinner"></div><p style="margin-top:8px;font-size:12px;color:var(--muted)">Searching...</p></div>';
-  const data = await mcpCall('memory_search', { query });
+  const data = await mcpCall('memory_search', { query, mode: 'hybrid', threshold: 0.05 });
   const results = Array.isArray(data) ? data : (data?.results || data?.memories || []);
   state.searchResults = results;
 
