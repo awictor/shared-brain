@@ -95,49 +95,39 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
     }
   });
 
-  // JSON API endpoint for browser use (no SSE streaming issues)
+  // JSON API endpoint for browser use — calls handler directly, no MCP SDK/SSE
   app.post('/api/mcp', async (req: Request, res: Response) => {
-    const server = createMcpServer();
     try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
+      const { method, params, id } = req.body;
+      if (method === 'tools/call' && params?.name && deps.handler) {
+        const toolName = params.name;
+        const args = params.arguments || {};
+        let result: any;
 
-      let responseData: any = null;
-      const originalWrite = res.write.bind(res);
-      const chunks: string[] = [];
-
-      // Intercept the SSE output to extract JSON
-      res.write = ((chunk: any) => {
-        const str = typeof chunk === 'string' ? chunk : chunk.toString();
-        chunks.push(str);
-        return true;
-      }) as any;
-
-      const originalEnd = res.end.bind(res);
-      res.end = ((...args: any[]) => {
-        // Parse SSE chunks to extract data
-        const fullText = chunks.join('');
-        const lines = fullText.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try { responseData = JSON.parse(line.slice(6)); } catch {}
-          }
+        switch (toolName) {
+          case 'memory_store': result = await deps.handler.handleStore(args); break;
+          case 'memory_search': result = await deps.handler.handleSearch(args); break;
+          case 'memory_get': result = await deps.handler.handleGet(args); break;
+          case 'memory_update': result = await deps.handler.handleUpdate(args); break;
+          case 'memory_delete': result = await deps.handler.handleDelete(args); break;
+          case 'memory_list': result = await deps.handler.handleList(args); break;
+          case 'memory_relate': result = await deps.handler.handleRelate(args); break;
+          case 'memory_import': result = await deps.handler.handleImport(args); break;
+          case 'memory_export': result = await deps.handler.handleExport(args); break;
+          case 'sync_status': result = await deps.handler.handleSyncStatus(); break;
+          default: result = { error: `Unknown tool: ${toolName}` };
         }
 
-        // Send as plain JSON
-        res.removeHeader('content-type');
-        res.setHeader('Content-Type', 'application/json');
-        originalEnd(JSON.stringify(responseData || { error: 'No response' }));
-        return res;
-      }) as any;
-
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } catch (error) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: error instanceof Error ? error.message : 'Internal error' });
+        res.json({
+          jsonrpc: '2.0',
+          id,
+          result: { content: [{ type: 'text', text: JSON.stringify(result) }] },
+        });
+      } else {
+        res.status(400).json({ error: 'Invalid request. Use method: tools/call with params.name' });
       }
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Internal error' });
     }
   });
 
