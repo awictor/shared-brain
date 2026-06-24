@@ -750,10 +750,11 @@ async function performSearch(query) {
     document.getElementById('search-results').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128528;</div><p>No results found for "' + esc(query) + '"</p></div>';
     return;
   }
-  document.getElementById('search-results').innerHTML = results.map(m => {
-    const score = m.score ?? m.similarity ?? 0;
+  document.getElementById('search-results').innerHTML = results.map(r => {
+    const m = r.memory || r;
+    const score = r.score ?? r.similarity ?? 0;
     const pct = Math.round(score * 100);
-    return '<div class="card search-result"><div class="card-header"><span class="card-title">' + esc(m.title || m.content?.slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
+    return '<div class="card search-result"><div class="card-header"><span class="card-title">' + esc(m.title || (m.content||'').slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
   }).join('');
 }
 
