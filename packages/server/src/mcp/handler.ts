@@ -359,10 +359,10 @@ export class MemoryHandler {
         rrfScores.set(id, rrfScore);
       }
 
-      // Sort by RRF score descending
-      mergedCandidates = [...rrfScores.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([id, score]) => ({ id, score }));
+      // Sort by RRF score descending and normalize to 0-1 range
+      const sorted = [...rrfScores.entries()].sort((a, b) => b[1] - a[1]);
+      const maxRRF = sorted[0]?.[1] || 1;
+      mergedCandidates = sorted.map(([id, score]) => ({ id, score: score / maxRRF }));
     } else if (mode === 'keyword') {
       mergedCandidates = keywordCandidates;
     } else {
