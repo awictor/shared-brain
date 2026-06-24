@@ -453,7 +453,7 @@ const BROWSE_HTML = `<!DOCTYPE html>
       try {
         const response = await fetch('/mcp', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
           body: JSON.stringify({
             jsonrpc: '2.0',
             id: 1,
@@ -465,10 +465,19 @@ const BROWSE_HTML = `<!DOCTYPE html>
           })
         });
 
-        const data = await response.json();
+        const rawText = await response.text();
+        let data;
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('text/event-stream')) {
+          for (const line of rawText.split(String.fromCharCode(10))) {
+            if (line.startsWith('data: ')) { try { data = JSON.parse(line.slice(6)); } catch {} }
+          }
+        } else {
+          data = JSON.parse(rawText);
+        }
 
-        if (data.error) {
-          throw new Error(data.error.message || 'Failed to fetch memories');
+        if (!data || data.error) {
+          throw new Error(data?.error?.message || 'Failed to fetch memories');
         }
 
         const result = JSON.parse(data.result.content[0].text);

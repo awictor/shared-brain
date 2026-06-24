@@ -819,7 +819,7 @@ const GRAPH_HTML = `<!DOCTYPE html>
       // Fetch full content from memory
       fetch('/mcp', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
         body: JSON.stringify({
           jsonrpc: '2.0',
           method: 'tools/call',
@@ -833,7 +833,7 @@ const GRAPH_HTML = `<!DOCTYPE html>
       .then(r => r.text())
       .then(text => {
         // Parse SSE stream
-        const lines = text.split('\\n').filter(l => l.startsWith('data: '));
+        const lines = text.split(String.fromCharCode(10)).filter(l => l.startsWith('data: '));
         if (lines.length > 0) {
           const lastLine = lines[lines.length - 1];
           const data = JSON.parse(lastLine.slice(6));

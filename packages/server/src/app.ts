@@ -535,7 +535,7 @@ async function mcpCall(toolName, args = {}) {
     let data;
     if (ct.includes('text/event-stream')) {
       const text = await res.text();
-      for (const line of text.split('\\n')) {
+      for (const line of text.split(String.fromCharCode(10))) {
         if (line.startsWith('data: ')) { try { data = JSON.parse(line.slice(6)); } catch {} }
       }
     } else { data = await res.json(); }
