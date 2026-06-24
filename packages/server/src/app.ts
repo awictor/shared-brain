@@ -529,6 +529,7 @@ if (document.readyState === 'complete') navigate(location.hash || '#dashboard');
 
 /*─── Base Path (auto-detect for reverse proxy) ───────────────────────────────*/
 const BASE = (() => { const p = window.location.pathname; const i = p.indexOf('/app'); return i > 0 ? p.substring(0, i) : ''; })();
+window.BASE = BASE;
 
 /*─── MCP Client ──────────────────────────────────────────────────────────────*/
 async function mcpCall(toolName, args = {}) {
@@ -916,6 +917,8 @@ function isInputFocused() {
   return tag === 'input' || tag === 'textarea' || tag === 'select';
 }
 </script>
-<script src="/ux-enhance.js"></script>
+<script>
+(function(){var s=document.createElement('script');s.src=(window.BASE||'')+'/ux-enhance.js';document.body.appendChild(s)})();
+</script>
 </body>
 </html>`;
