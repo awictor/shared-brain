@@ -621,14 +621,17 @@ export class MemoryHandler {
   /**
    * Get sync status: pending operations count and last sync time.
    */
-  async handleSyncStatus(): Promise<{ pendingOps: number; lastSyncTime: string | null; vectorCount: number }> {
+  async handleSyncStatus(): Promise<{ pendingOps: number; lastSyncTime: string | null; vectorCount: number; syncRelay: string; memoryCount: number }> {
     const pendingOps = await this.store.getPendingOperations();
     const lastSyncTime = await this.store.getLastSyncTime();
+    const memoryCount = await this.store.countMemories();
 
     return {
       pendingOps: pendingOps.length,
       lastSyncTime,
       vectorCount: this.vectorIndex.size(),
+      syncRelay: 'not configured (standalone mode)',
+      memoryCount,
     };
   }
 

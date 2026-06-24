@@ -115,6 +115,20 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
           case 'memory_import': result = await deps.handler.handleImport(args); break;
           case 'memory_export': result = await deps.handler.handleExport(args); break;
           case 'sync_status': result = await deps.handler.handleSyncStatus(); break;
+          case 'clear_pending_ops': {
+            // Clear accumulated pending operations (no sync relay configured)
+            const pending = await deps.store.getPendingOperations();
+            // Mark all as synced by updating the database directly
+            if (pending.length > 0 && (deps.store as any).db) {
+              (deps.store as any).db.run('UPDATE operations SET synced = 1 WHERE synced = 0');
+              const data = (deps.store as any).db.export();
+              const { writeFileSync } = await import('fs');
+              const dbPath = process.env['DB_PATH'] || '';
+              if (dbPath) writeFileSync(dbPath, Buffer.from(data));
+            }
+            result = { cleared: pending.length, message: `Cleared ${pending.length} pending operations` };
+            break;
+          }
           case 'memory_reembed': {
             // Re-embed all memories with current embedding engine
             const memories = await deps.store.listMemories({ limit: 10000, offset: 0 });
