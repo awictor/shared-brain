@@ -527,7 +527,7 @@ window.addEventListener('hashchange', () => navigate(location.hash));
 window.addEventListener('load', () => navigate(location.hash || '#dashboard'));
 
 /*─── Base Path (auto-detect for reverse proxy) ───────────────────────────────*/
-const BASE = window.location.pathname.replace(/\\/app.*$/, '').replace(/\\/$/, '');
+const BASE = (() => { const p = window.location.pathname; const i = p.indexOf('/app'); return i > 0 ? p.substring(0, i) : ''; })();
 
 /*─── MCP Client ──────────────────────────────────────────────────────────────*/
 async function mcpCall(toolName, args = {}) {
