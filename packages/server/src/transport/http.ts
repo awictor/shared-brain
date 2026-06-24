@@ -115,6 +115,21 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
           case 'memory_import': result = await deps.handler.handleImport(args); break;
           case 'memory_export': result = await deps.handler.handleExport(args); break;
           case 'sync_status': result = await deps.handler.handleSyncStatus(); break;
+          case 'memory_reembed': {
+            // Re-embed all memories with current embedding engine
+            const memories = await deps.store.listMemories({ limit: 10000, offset: 0 });
+            let count = 0;
+            for (const m of memories) {
+              if (m.content) {
+                const emb = await deps.handler['embeddings'].embed(m.content);
+                await deps.store.updateMemory(m.id, { embedding: emb } as any);
+                deps.handler['vectorIndex'].add(m.id, emb);
+                count++;
+              }
+            }
+            result = { reembedded: count, message: `Re-embedded ${count} memories with current engine` };
+            break;
+          }
           default: result = { error: `Unknown tool: ${toolName}` };
         }
 
