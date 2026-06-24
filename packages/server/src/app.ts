@@ -525,6 +525,7 @@ function navigate(hash) {
 
 window.addEventListener('hashchange', () => navigate(location.hash));
 window.addEventListener('load', () => navigate(location.hash || '#dashboard'));
+if (document.readyState === 'complete') navigate(location.hash || '#dashboard');
 
 /*─── Base Path (auto-detect for reverse proxy) ───────────────────────────────*/
 const BASE = (() => { const p = window.location.pathname; const i = p.indexOf('/app'); return i > 0 ? p.substring(0, i) : ''; })();
@@ -571,6 +572,7 @@ async function loadPageData(page) {
 }
 
 async function loadDashboard() {
+  try {
   // Stats
   const [memories, syncData, health] = await Promise.all([
     mcpCall('memory_list', {}),
@@ -597,6 +599,7 @@ async function loadDashboard() {
   document.getElementById('dash-recent').innerHTML = recent.length
     ? recent.map(m => renderMemoryCard(m)).join('')
     : '<div class="empty-state"><div class="empty-icon">&#128218;</div><p>No memories stored yet. Use the quick store below to add your first memory.</p></div>';
+  } catch(err) { document.getElementById('dash-recent').innerHTML = '<div style="color:#ef4444;padding:20px">Dashboard error: ' + (err.message||err) + '</div>'; console.error('loadDashboard error:', err); }
 }
 
 async function loadCheckin() {
