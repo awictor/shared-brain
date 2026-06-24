@@ -161,11 +161,7 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
     res.redirect(302, '/app');
   });
 
-  // Canonical dashboard at /app
-  app.get('/app', (_req: Request, res: Response) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(DASHBOARD_HTML);
-  });
+  // /app is handled by registerApp() in app.ts — do NOT register here
 }
 
 const LANDING_HTML = `<!DOCTYPE html>
