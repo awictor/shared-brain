@@ -533,7 +533,7 @@ const BASE = (() => { const p = window.location.pathname; const i = p.indexOf('/
 async function mcpCall(toolName, args = {}) {
   try {
     const body = JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: toolName, arguments: args } });
-    const res = await fetch(BASE + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body });
+    const res = await fetch(BASE + '/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
     const ct = res.headers.get('content-type') || '';
     let data;
     if (ct.includes('text/event-stream')) {

@@ -95,6 +95,52 @@ export function createHttpTransport(deps: TransportDeps, app: Application): void
     }
   });
 
+  // JSON API endpoint for browser use (no SSE streaming issues)
+  app.post('/api/mcp', async (req: Request, res: Response) => {
+    const server = createMcpServer();
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+
+      let responseData: any = null;
+      const originalWrite = res.write.bind(res);
+      const chunks: string[] = [];
+
+      // Intercept the SSE output to extract JSON
+      res.write = ((chunk: any) => {
+        const str = typeof chunk === 'string' ? chunk : chunk.toString();
+        chunks.push(str);
+        return true;
+      }) as any;
+
+      const originalEnd = res.end.bind(res);
+      res.end = ((...args: any[]) => {
+        // Parse SSE chunks to extract data
+        const fullText = chunks.join('');
+        const lines = fullText.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try { responseData = JSON.parse(line.slice(6)); } catch {}
+          }
+        }
+
+        // Send as plain JSON
+        res.removeHeader('content-type');
+        res.setHeader('Content-Type', 'application/json');
+        originalEnd(JSON.stringify(responseData || { error: 'No response' }));
+        return res;
+      }) as any;
+
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (error) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: error instanceof Error ? error.message : 'Internal error' });
+      }
+    }
+  });
+
   app.get('/mcp', async (_req: Request, res: Response) => {
     res.writeHead(405).end(JSON.stringify({
       jsonrpc: '2.0',
