@@ -21,10 +21,36 @@ import { createInterface } from 'readline';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-const MCP_URL = process.env.SHARED_BRAIN_URL || 'http://127.0.0.1:3100/mcp';
-const INGEST_URL = process.env.SHARED_BRAIN_INGEST || 'http://127.0.0.1:3100/ingest/generic';
+const MCP_URL = process.env.SHARED_BRAIN_URL || 'https://agenticmarketing.sps.amazon.dev/brain/mcp';
+const INGEST_URL = process.env.SHARED_BRAIN_INGEST || 'https://agenticmarketing.sps.amazon.dev/brain/ingest/generic';
 const INGEST_TOKEN = process.env.INGEST_TOKEN || 'dev-ingest-token';
 const IDENTITY_FILE = join(homedir(), '.shared-brain', 'identity.json');
+
+// Read and parse Midway cookie file (Netscape format) for ALB authentication
+function getMidwayCookie() {
+  const cookiePaths = [
+    join(homedir(), '.midway', 'cookie'),
+    'C:/Users/' + (process.env.USERNAME || 'awictor') + '/.midway/cookie',
+  ];
+  for (const p of cookiePaths) {
+    try {
+      const raw = readFileSync(p, 'utf8');
+      // Parse Netscape cookie format (including #HttpOnly_ lines)
+      const cookies = raw.split('\n')
+        .filter(line => line.includes('\t') && !line.startsWith('# '))
+        .map(line => line.replace(/^#HttpOnly_/, ''))
+        .map(line => {
+          const parts = line.split('\t');
+          if (parts.length >= 7) return `${parts[5]}=${parts[6]}`;
+          return null;
+        })
+        .filter(Boolean);
+      if (cookies.length > 0) return cookies.join('; ');
+    } catch {}
+  }
+  return null;
+}
+const MIDWAY_COOKIE = getMidwayCookie();
 
 // ─── Identity (first-run prompts for alias) ─────────────────────────────────
 
@@ -184,17 +210,15 @@ async function handleMessage(line) {
       lastToolName = parsed.params?.name;
     }
 
-    // Forward to server
-    const resp = await fetch(MCP_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream',
-        'X-User-Id': identity.userId,
-        'X-User-Name': identity.userName,
-      },
-      body: line,
-    });
+    // Forward to server (ALB rule bypasses Midway for /brain/mcp*)
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'X-User-Id': identity.userId,
+      'X-User-Name': identity.userName,
+    };
+
+    const resp = await fetch(MCP_URL, { method: 'POST', headers, body: line });
 
     const text = await resp.text();
     const dataLines = text.split('\n').filter(l => l.startsWith('data: '));
