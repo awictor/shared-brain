@@ -526,11 +526,14 @@ function navigate(hash) {
 window.addEventListener('hashchange', () => navigate(location.hash));
 window.addEventListener('load', () => navigate(location.hash || '#dashboard'));
 
+/*─── Base Path (auto-detect for reverse proxy) ───────────────────────────────*/
+const BASE = window.location.pathname.replace(/\\/app.*$/, '').replace(/\\/$/, '');
+
 /*─── MCP Client ──────────────────────────────────────────────────────────────*/
 async function mcpCall(toolName, args = {}) {
   try {
     const body = JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method: 'tools/call', params: { name: toolName, arguments: args } });
-    const res = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body });
+    const res = await fetch(BASE + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }, body });
     const ct = res.headers.get('content-type') || '';
     let data;
     if (ct.includes('text/event-stream')) {
@@ -549,7 +552,7 @@ async function mcpCall(toolName, args = {}) {
 }
 
 async function restGet(url) {
-  try { const r = await fetch(url); return r.ok ? await r.json() : null; } catch { return null; }
+  try { const r = await fetch(BASE + url); return r.ok ? await r.json() : null; } catch { return null; }
 }
 
 /*─── Page Data Loaders ───────────────────────────────────────────────────────*/
@@ -822,7 +825,7 @@ async function testIngest(type) {
     body = { title: document.getElementById('ingest-meeting-title').value, notes: document.getElementById('ingest-meeting-notes').value, attendees: document.getElementById('ingest-meeting-attendees').value.split(',').map(a => a.trim()).filter(Boolean), timestamp: new Date().toISOString() };
   }
   try {
-    const res = await fetch('/ingest/' + type, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) });
+    const res = await fetch(BASE + '/ingest/' + type, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(body) });
     if (res.ok) { toast('Ingested successfully', 'success'); loadIngestLog(); }
     else { toast('Ingestion failed: ' + res.status, 'error'); }
   } catch (e) { toast('Ingestion error', 'error'); }
