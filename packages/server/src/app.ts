@@ -788,8 +788,8 @@ async function performSearch(query) {
     const score = r.score ?? r.similarity ?? 0;
     const pct = Math.round(score * 100);
     if (m.id) state.memoryCache[m.id] = m;
-    const click = m.id ? ' clickable" onclick="openMemoryModal(\'' + esc(m.id) + '\')"' : '"';
-    return '<div class="card search-result' + click + '><div class="card-header"><span class="card-title">' + esc(m.title || (m.content||'').slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + (((m.content||'').length>180)?'…':'') + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
+    const attrs = m.id ? ' clickable" data-mid="' + esc(m.id) + '"' : '"';
+    return '<div class="card search-result' + attrs + '><div class="card-header"><span class="card-title">' + esc(m.title || (m.content||'').slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + (((m.content||'').length>180)?'…':'') + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
   }).join('');
 }
 
@@ -885,8 +885,8 @@ function renderMemoryCard(m) {
   const tags = m.tags || [];
   const date = m.createdAt || m.created_at || '';
   if (m.id) state.memoryCache[m.id] = m;
-  const click = m.id ? ' clickable" onclick="openMemoryModal(\'' + esc(m.id) + '\')"' : '"';
-  return '<div class="card' + click + '><div class="card-header"><span class="card-title">' + esc(title) + '</span><span class="badge badge-type">' + esc(m.type||'note') + '</span><span class="badge badge-scope">' + esc(m.scope||'') + '</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,120)) + (((m.content||'').length>120)?'…':'') + '</div><div class="flex gap-8 items-center">' + tags.map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + (date ? new Date(date).toLocaleDateString() : '') + '</span></div></div>';
+  const attrs = m.id ? ' clickable" data-mid="' + esc(m.id) + '"' : '"';
+  return '<div class="card' + attrs + '><div class="card-header"><span class="card-title">' + esc(title) + '</span><span class="badge badge-type">' + esc(m.type||'note') + '</span><span class="badge badge-scope">' + esc(m.scope||'') + '</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,120)) + (((m.content||'').length>120)?'…':'') + '</div><div class="flex gap-8 items-center">' + tags.map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + (date ? new Date(date).toLocaleDateString() : '') + '</span></div></div>';
 }
 
 async function openMemoryModal(id) {
@@ -923,6 +923,11 @@ function closeMemoryModal() {
 window.openMemoryModal = openMemoryModal;
 window.closeMemoryModal = closeMemoryModal;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMemoryModal(); });
+// Delegated click: open the detail modal for any card carrying a data-mid.
+document.addEventListener('click', (e) => {
+  const card = e.target.closest && e.target.closest('[data-mid]');
+  if (card) openMemoryModal(card.getAttribute('data-mid'));
+});
 
 function toast(message, type = 'info') {
   const container = document.getElementById('toast-container');
