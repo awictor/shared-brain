@@ -37,7 +37,7 @@ import type { Store, Embeddings, VectorIndex, FullTextIndex, ListOptions, ScopeF
 // @ts-ignore — sql.js has no type declarations
 import initSqlJs from 'sql.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 
 // ─── Environment Configuration ──────────────────────────────────────────────
 
@@ -604,10 +604,14 @@ console.log(`[checkin] Context briefing ready → http://${host}:${port}/demo/ch
 
 // Wire up the passive ingest engine + demo UI
 const ingestToken = process.env['INGEST_TOKEN'] ?? 'dev-ingest-token';
+// Persist the ingest log next to the DB so it survives restarts.
+const ingestLogPath = process.env['INGEST_LOG_PATH']
+  ?? (process.env['DB_PATH'] ? join(dirname(process.env['DB_PATH']), 'ingest-log.json') : './data/ingest-log.json');
 const ingestEngine = new IngestEngine(store, embeddings, vectorIndex, {
   token: ingestToken,
   minContentLength: parseInt(process.env['INGEST_MIN_LENGTH'] ?? '20', 10),
   deduplicateThreshold: parseFloat(process.env['INGEST_DEDUP_THRESHOLD'] ?? '0.85'),
+  logPath: ingestLogPath,
 });
 ingestEngine.registerRoutes(app);
 registerIngestDemo(app, ingestEngine);

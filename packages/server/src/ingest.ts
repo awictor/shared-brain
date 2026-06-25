@@ -8,6 +8,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { timingSafeEqual, createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { Request, Response, NextFunction, Application } from 'express';
 import type { Store, Embeddings, VectorIndex, Memory, MemoryOperation } from './mcp/handler.js';
 
@@ -17,6 +19,7 @@ export interface IngestConfig {
   token: string;
   minContentLength: number;   // Skip messages shorter than this (default: 20)
   deduplicateThreshold: number; // Skip if similarity > this (default: 0.85)
+  logPath?: string;           // Optional JSON file to persist the ingest log across restarts
 }
 
 export interface SlackEvent {
@@ -144,13 +147,48 @@ const LOCAL_USER_NAME = 'Ingest Engine';
 export class IngestEngine {
   private log: IngestLogEntry[] = [];
   private readonly maxLogEntries = 500;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private store: Store,
     private embeddings: Embeddings,
     private vectorIndex: VectorIndex,
     private config: IngestConfig,
-  ) {}
+  ) {
+    this.loadLog();
+  }
+
+  /** Load the persisted log from disk, if a logPath is configured. */
+  private loadLog(): void {
+    if (!this.config.logPath) return;
+    try {
+      const raw = readFileSync(this.config.logPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        this.log = parsed.slice(-this.maxLogEntries);
+      }
+    } catch {
+      // No file yet (first run) or unreadable — start empty.
+    }
+  }
+
+  /** Persist the log to disk, debounced and atomic (write-temp + rename). */
+  private persistLog(): void {
+    if (!this.config.logPath) return;
+    if (this.persistTimer) return; // already scheduled
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      try {
+        const path = this.config.logPath!;
+        mkdirSync(dirname(path), { recursive: true });
+        const tmp = `${path}.tmp`;
+        writeFileSync(tmp, JSON.stringify(this.log));
+        renameSync(tmp, path);
+      } catch {
+        // Persistence is best-effort — never break ingestion on a disk error.
+      }
+    }, 250);
+  }
 
   /**
    * Register all /ingest/* routes on the Express app.
@@ -565,5 +603,6 @@ export class IngestEngine {
     if (this.log.length > this.maxLogEntries) {
       this.log = this.log.slice(-this.maxLogEntries);
     }
+    this.persistLog();
   }
 }

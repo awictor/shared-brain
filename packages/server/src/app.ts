@@ -627,11 +627,13 @@ async function loadCheckin() {
 async function loadIngestLog() {
   const data = await restGet('/ingest/log');
   const el = document.getElementById('ingest-log-list');
-  if (!data || !Array.isArray(data) || !data.length) {
+  // Endpoint returns { entries: [...], total: N }; tolerate a bare array too.
+  const entries = Array.isArray(data) ? data : (data && Array.isArray(data.entries) ? data.entries : null);
+  if (!entries || !entries.length) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128229;</div><p>No ingestion events yet. Use the tabs above to test ingestion.</p></div>';
     return;
   }
-  el.innerHTML = data.slice(0,30).map(entry => '<div class="card"><div class="card-header"><span class="card-title">' + esc(entry.source || entry.type || 'unknown') + '</span><span class="badge badge-type">' + esc(entry.type || '') + '</span><span style="font-size:11px;color:var(--muted);margin-left:auto">' + (entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '') + '</span></div><div style="font-size:12px;color:var(--muted)">' + esc((entry.content || entry.summary || '').slice(0,120)) + '</div></div>').join('');
+  el.innerHTML = entries.slice(0,30).map(entry => '<div class="card"><div class="card-header"><span class="card-title">' + esc(entry.source || entry.type || 'unknown') + '</span><span class="badge badge-type">' + esc(entry.stored ? 'stored' : (entry.reason || 'skipped')) + '</span><span style="font-size:11px;color:var(--muted);margin-left:auto">' + (entry.timestamp ? new Date(entry.timestamp).toLocaleString() : '') + '</span></div><div style="font-size:12px;color:var(--muted)">' + esc(entry.sourceDetail || entry.content || entry.summary || '') + '</div></div>').join('');
 }
 
 async function loadSync() {
