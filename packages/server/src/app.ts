@@ -153,6 +153,20 @@ textarea.input{min-height:100px;resize:vertical;font-family:inherit}
 
 @keyframes toast-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 
+/*─── Memory detail modal ──────────────────────────────────────────────────────*/
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:none;align-items:flex-start;justify-content:center;padding:48px 16px;overflow-y:auto}
+.modal-overlay.open{display:flex;animation:toast-in 160ms ease}
+.modal{background:var(--bg-card,#fff);color:var(--text,#232F3E);border-radius:var(--radius-card,10px);box-shadow:var(--shadow-lg);max-width:760px;width:100%;max-height:none}
+.modal-header{display:flex;align-items:flex-start;gap:12px;padding:20px 24px;border-bottom:1px solid var(--border)}
+.modal-header h2{font-size:18px;margin:0;flex:1;word-break:break-word}
+.modal-close{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:var(--muted);padding:0 4px}
+.modal-close:hover{color:var(--text,#232F3E)}
+.modal-body{padding:20px 24px}
+.modal-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px}
+.modal-content-text{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.6;color:var(--text,#232F3E)}
+.card.clickable{cursor:pointer;transition:box-shadow 120ms,transform 120ms}
+.card.clickable:hover{box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+
 /*─── Page: Search ────────────────────────────────────────────────────────────*/
 .search-page-input{font-size:18px;padding:14px 20px;margin-bottom:16px}
 .search-results{display:grid;gap:12px}
@@ -498,6 +512,18 @@ textarea.input{min-height:100px;resize:vertical;font-family:inherit}
 
 <!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
+<div class="modal-overlay" id="memory-modal" onclick="if(event.target===this)closeMemoryModal()">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <h2 id="memory-modal-title">Memory</h2>
+      <button class="modal-close" onclick="closeMemoryModal()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-meta" id="memory-modal-meta"></div>
+      <div class="modal-content-text" id="memory-modal-content"></div>
+    </div>
+  </div>
+</div>
 
 <script>
 /*─── State ───────────────────────────────────────────────────────────────────*/
@@ -507,7 +533,8 @@ const state = {
   searchResults: [],
   searchDebounce: null,
   startTime: Date.now(),
-  scope: 'personal'
+  scope: 'personal',
+  memoryCache: {}
 };
 
 /*─── Router ──────────────────────────────────────────────────────────────────*/
@@ -760,7 +787,9 @@ async function performSearch(query) {
     const m = r.memory || r;
     const score = r.score ?? r.similarity ?? 0;
     const pct = Math.round(score * 100);
-    return '<div class="card search-result"><div class="card-header"><span class="card-title">' + esc(m.title || (m.content||'').slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
+    if (m.id) state.memoryCache[m.id] = m;
+    const click = m.id ? ' clickable" onclick="openMemoryModal(\'' + esc(m.id) + '\')"' : '"';
+    return '<div class="card search-result' + click + '><div class="card-header"><span class="card-title">' + esc(m.title || (m.content||'').slice(0,50) || 'Untitled') + '</span><span class="badge badge-type">' + esc(m.type||'') + '</span><div class="result-score"><span>' + pct + '%</span><div class="score-bar"><div class="score-fill" style="width:' + pct + '%"></div></div></div></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,180)) + (((m.content||'').length>180)?'…':'') + '</div><div class="flex gap-8">' + (m.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div></div>';
   }).join('');
 }
 
@@ -855,8 +884,45 @@ function renderMemoryCard(m) {
   const title = m.title || (m.content ? m.content.slice(0,50) : 'Untitled');
   const tags = m.tags || [];
   const date = m.createdAt || m.created_at || '';
-  return '<div class="card"><div class="card-header"><span class="card-title">' + esc(title) + '</span><span class="badge badge-type">' + esc(m.type||'note') + '</span><span class="badge badge-scope">' + esc(m.scope||'') + '</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,120)) + '</div><div class="flex gap-8 items-center">' + tags.map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + (date ? new Date(date).toLocaleDateString() : '') + '</span></div></div>';
+  if (m.id) state.memoryCache[m.id] = m;
+  const click = m.id ? ' clickable" onclick="openMemoryModal(\'' + esc(m.id) + '\')"' : '"';
+  return '<div class="card' + click + '><div class="card-header"><span class="card-title">' + esc(title) + '</span><span class="badge badge-type">' + esc(m.type||'note') + '</span><span class="badge badge-scope">' + esc(m.scope||'') + '</span></div><div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc((m.content||'').slice(0,120)) + (((m.content||'').length>120)?'…':'') + '</div><div class="flex gap-8 items-center">' + tags.map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '<span style="font-size:11px;color:var(--muted);margin-left:auto">' + (date ? new Date(date).toLocaleDateString() : '') + '</span></div></div>';
 }
+
+async function openMemoryModal(id) {
+  const overlay = document.getElementById('memory-modal');
+  const titleEl = document.getElementById('memory-modal-title');
+  const metaEl = document.getElementById('memory-modal-meta');
+  const contentEl = document.getElementById('memory-modal-content');
+  // Show immediately from cache, then refresh with the authoritative full record.
+  let m = state.memoryCache[id] || null;
+  const render = (mem) => {
+    if (!mem) return;
+    titleEl.textContent = mem.title || (mem.content ? mem.content.slice(0,60) : 'Untitled');
+    const date = mem.createdAt || mem.created_at || '';
+    metaEl.innerHTML = '<span class="badge badge-type">' + esc(mem.type||'note') + '</span>'
+      + '<span class="badge badge-scope">' + esc(mem.scope||'') + '</span>'
+      + (mem.authorName ? '<span style="font-size:11px;color:var(--muted)">by ' + esc(mem.authorName) + '</span>' : '')
+      + (date ? '<span style="font-size:11px;color:var(--muted)">' + new Date(date).toLocaleString() + '</span>' : '')
+      + (mem.tags||[]).map(t => '<span class="tag">' + esc(t) + '</span>').join('');
+    contentEl.textContent = mem.content || '(no content)';
+  };
+  render(m);
+  contentEl.textContent = m ? (m.content || '') : 'Loading…';
+  overlay.classList.add('open');
+  // Always fetch the full record so nothing is truncated.
+  const full = await mcpCall('memory_get', { id });
+  const mem = full?.memory || full;
+  if (mem && mem.content) { state.memoryCache[id] = mem; render(mem); }
+  else if (!m) { contentEl.textContent = 'Could not load this memory.'; }
+}
+
+function closeMemoryModal() {
+  document.getElementById('memory-modal').classList.remove('open');
+}
+window.openMemoryModal = openMemoryModal;
+window.closeMemoryModal = closeMemoryModal;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMemoryModal(); });
 
 function toast(message, type = 'info') {
   const container = document.getElementById('toast-container');
