@@ -451,6 +451,20 @@ export class IngestEngine {
     return this.log.slice(-limit).reverse();
   }
 
+  /**
+   * Record a memory that was stored directly via the MCP memory_store tool
+   * (not through a webhook). Lets the Ingestion Log reflect all memory
+   * activity, not just passive webhook traffic.
+   */
+  recordStore(detail: { memoryId: string; title?: string | null; type?: string }): void {
+    this.addLogEntry(
+      'memory_store',
+      detail.title || detail.type || detail.memoryId,
+      true,
+      detail.memoryId,
+    );
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────────
 
   private async isDuplicate(text: string): Promise<boolean> {

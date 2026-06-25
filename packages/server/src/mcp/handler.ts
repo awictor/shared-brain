@@ -181,6 +181,11 @@ export class MemoryHandler {
   private _currentUserId: string = LOCAL_USER_ID;
   private _currentUserName: string = LOCAL_USER_NAME;
 
+  // Optional hook fired after a successful store — used to surface MCP stores
+  // in the Ingestion Log. Set via setStoreHook(); failures are swallowed so a
+  // logging error can never break a memory write.
+  private _onStore?: (detail: { memoryId: string; title?: string | null; type?: string }) => void;
+
   constructor(
     private readonly store: Store,
     private readonly embeddings: Embeddings,
@@ -202,6 +207,10 @@ export class MemoryHandler {
   setCurrentUser(userId: string, userName?: string): void {
     this._currentUserId = userId;
     if (userName) this._currentUserName = userName;
+  }
+
+  setStoreHook(hook: (detail: { memoryId: string; title?: string | null; type?: string }) => void): void {
+    this._onStore = hook;
   }
 
   /**
@@ -303,6 +312,13 @@ export class MemoryHandler {
 
       // Check for milestones
       await this.notificationManager.checkMilestone();
+    }
+
+    // Surface this store in the Ingestion Log (best-effort, never throws).
+    if (this._onStore) {
+      try {
+        this._onStore({ memoryId: id, title: memory.title, type: memory.type });
+      } catch { /* logging must not break a write */ }
     }
 
     return { id, message: `Memory stored successfully.` };

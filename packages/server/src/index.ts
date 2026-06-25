@@ -611,6 +611,10 @@ const ingestEngine = new IngestEngine(store, embeddings, vectorIndex, {
 });
 ingestEngine.registerRoutes(app);
 registerIngestDemo(app, ingestEngine);
+
+// Mirror direct MCP memory_store calls into the Ingestion Log so it reflects
+// all memory activity, not just passive webhook traffic.
+handler.setStoreHook((detail) => ingestEngine.recordStore(detail));
 console.log(`[ingest] Passive ingestion webhooks ready → http://${host}:${port}/ingest/{slack,email,meeting,generic,batch}`);
 console.log(`[ingest] Demo UI → http://${host}:${port}/demo/ingest`);
 

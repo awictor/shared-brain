@@ -12,8 +12,9 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-const BRAIN_URL = 'http://127.0.0.1:3100/ingest/generic';
-const INGEST_TOKEN = 'dev-ingest-token';
+// Point at the live remote brain by default; override with BRAIN_INGEST_URL for local dev.
+const BRAIN_URL = process.env.BRAIN_INGEST_URL ?? 'https://agenticmarketing.sps.amazon.dev/brain/ingest/generic';
+const INGEST_TOKEN = process.env.INGEST_TOKEN ?? 'dev-ingest-token';
 const CACHE_DIR = join(homedir(), 'AppData', 'Local', 'claude-cli-nodejs', 'Cache', 'C--Users-awictor');
 
 // Patterns that indicate meaningful content worth remembering
@@ -69,7 +70,7 @@ async function ingest(content, metadata = {}) {
       if (data.stored) process.stderr.write(`[brain] Stored: ${content.substring(0, 60)}...\n`);
     }
   } catch (err) {
-    process.stderr.write(`[brain] WARNING: SharedBrain server not reachable at ${BRAIN_URL} — memories are NOT being saved. Start it with: cscript //nologo C:/Users/awictor/shared-brain/start-server.vbs\n`);
+    process.stderr.write(`[brain] WARNING: SharedBrain ingest endpoint not reachable at ${BRAIN_URL} — memories are NOT being saved. Check network/VPN, or set BRAIN_INGEST_URL for local dev.\n`);
   }
 }
 
